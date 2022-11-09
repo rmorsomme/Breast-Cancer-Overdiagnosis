@@ -1,0 +1,174 @@
+---
+title: "Data exploration"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, message=F}
+library(tidyverse)
+library(lubridate) # dates
+```
+
+## Read in data
+
+```{r}
+path <- "/Users/mdr30/Library/CloudStorage/Box-Box/Swiss_MMG/Swiss_data_11_07_19/Swiss (Vaud) data for overdiagnosis project" # Marc
+
+path <- "C:/Users/18582/Box/Overdiagnosis_Estimation/Swiss_data/Swiss (Vaud) data for overdiagnosis project/" # Raphael
+
+dat.comp <- read_delim(
+  file  = paste0(path, "compliance.csv"),
+  delim = ";"
+  )
+
+dat.exam <- read_delim(
+  file  = paste0(path, "mammogram.csv"),
+  delim = ";"
+  )
+
+dat.woman <- read_delim(
+  file  = paste0(path, "woman.csv"),
+  delim = ";"
+  )
+```
+
+## Compliance data
+
+```{r}
+
+# number of realized screens
+dat.comp %>% count(nopartreas) # 376K realized screens (9)
+
+# distribution of number of realized screens per woman
+dat.comp %>% 
+  filter(nopartreas == 9) %>% # realized screens only
+  count(nodoss) %>%
+  ggplot(aes(x=n)) + geom_bar()
+
+# number of missing dates among realized screens
+dat.comp %>%
+  mutate(exam_date_missing = examdt == "99999999") %>%
+  count(nopartreas, exam_date_missing)
+
+
+# distribution of wait time between screens
+d_interval <- dat.comp %>%
+  filter(examdt != "99999999") %>%
+  mutate(
+    exam_date     = dmy(examdt),
+    exam_date_int = as.integer(exam_date)) %>%
+  group_by(nodoss) %>%
+  arrange(nodoss , exam_date) %>%
+  mutate(
+    interval_day  = c(diff(exam_date_int), 0),
+    interval_year = interval_day / 365
+    ) %>%
+  filter(interval_year > 0) 
+
+d_interval %>%
+  ggplot(aes(interval_year)) +
+  geom_histogram(bins = 100) +
+  xlim(0, 5)
+
+summary(d_interval$interval_year)
+```
+
+**Remarks**:
+
+-   There are 376K realized screens.
+
+-   No realized screens has a missing exam date (very good!).
+
+-   Most women had multiple (up to 10) screens.
+
+-   The typical interval between consecutive screens is 2 years, with a small tail to the right \[IQR = (2, 2.24)\].
+
+## Woman data
+
+```{r}
+dat.woman %>% count(endpoint)
+
+# top three days for each endpoint category
+dat.woman %>% 
+  group_by(endpoint) %>%
+  count(endpointdt, sort = TRUE) %>%
+  slice(1:3)
+
+# mode of detection and endpoint
+dat.woman %>% count(endpoint, detec)
+```
+
+**Remarks**:
+
+-   2,244 women had a cancer
+
+    -   350 cancers with a missing date
+
+    -   1,596 cancers screen-detected in program
+
+    -   70 cancers symptomatic/clinical (again, this is a very small number to learn the sojourn time distribution)
+
+    -   429 cancers with unknown detection mode
+
+-   (too) many women censored (endpoint = 5) on the same days.
+
+-   mode of detection seems incoherent with endpoint, e.g. screen-detected (detec=1,2) with deaths (endpoint=2)
+
+## Exam data
+
+I first merge the three data sets.
+
+```{r}
+d_join <- left_join(
+  dat.comp %>% mutate(row_id = 1:nrow(.)),
+  dat.exam %>% mutate(row_id = 1:nrow(.)),
+  by = c("row_id", "nodoss", "examdt") # have to join by row_id because there are multiple rows with examdt=9999999 and the same nodoss
+  ) %>%
+  left_join(dat.woman, by = "nodoss") 
+```
+
+```{r}
+# coherence across data sets
+all(dat.comp$nodoss == dat.exam$nodoss)
+all(dat.comp$examdt == dat.exam$examdt)
+
+
+d_join %>%
+  count(nopartreas, concl)
+
+d_join %>% 
+  filter(
+    nopartreas == 9,
+    concl      != 9
+    ) %>%
+  mutate(concl_binary = concl > 3) %>%
+  count(concl_binary)
+```
+
+**Remarks:**
+
+-   Variables `nodoss` and `examdt` are the same in the two data sets (good!).
+
+-   `concl` (BI-RADS) seems incoherent with `nopartreas` (Reason not attending), e.g. BI-RADS=5 for women that *did not attend for medical reason*.
+
+-   430 unknown BI-RADS among realized screens
+
+-   +- 2,200 positive screens (BI-RADS\>3)
+
+## Clean data
+
+```{r}
+d_join %>%
+  select(
+    row_id, nodoss, birthdate,
+    examdt, nopartreas,
+    concl,
+    endpoint,
+    endpointdt
+    ) %>%
+  mutate_at(vars(examdt, birthdate, endpointdt), na_if, "99999999") %>%
+  mutate_at(vars(examdt, birthdate, endpointdt), dmy)
+```
+
+**Question**: what rows do we keep?
