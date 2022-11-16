@@ -6,19 +6,22 @@ editor_options:
 ---
 
 ```{r}
+rm(list = ls())
 library(tidyverse)
+library(tictoc)
+source("helpers.R")
 ```
 
 ```{r}
 theta <- list(
-  rate_H = 3.5e-6, shape_H = 4,
+  rate_H = 0.001 , shape_H = 2,
   rate_P = 0.0015, shape_P = 4,
-  beta   = 0.814, psy     = 0.045
+  beta   = 0.814 , psy     = 0.045
 )
 
 prior <- list(
   rate_H = 1, shape_H = 1, # gamma(shape_H, rate_H) prior on Weibull rate for H
-  rate_P = 1, shape_P = 1, # gamma(shape_P, rate_P) prior on Weibull rate for P
+  rate_P = 10, shape_P = .01, # gamma(shape_P, rate_P) prior on Weibull rate for P
   a_psy  = 1, b_psy   = 1, # beta(a_psy, b_psy) prior on beta
   a_beta = 1, b_beta  = 1  # beta(a_beta, b_beta) prior on psy
 )
@@ -28,7 +31,7 @@ age_start <- 40
 ages_screen <- seq(age_start, 150, by = 2)
 n_screen <- length(ages_screen)
 
-n <- 1e2
+n <- 1e3
 d_process <- tibble(
   person_id = numeric(n), age_start = numeric(n), 
   sojourn_H = numeric(n), tau_HP    = numeric(n),
@@ -39,8 +42,8 @@ d_obs_screen <- tibble(
   person_id  = numeric(), screen_id       = numeric(), 
   age_screen = numeric(), screen_detected = numeric()
 )
-d_obs_clinical <- tibble(
-  person_id = numeric(n), clinical_detected = logical(n), tau_PC_obs = numeric(n)
+d_obs_censor <- tibble(
+  person_id = numeric(n), censor_type = character(n), censor_time = numeric(n)
   )
 ```
 
@@ -66,7 +69,8 @@ for(i in 1 : n){ # person i
 
 ```{r}
 # Does Marc find this acceptable?
-hist(d_process$tau_HP   , breaks = 100, main = "Healthy to preclinical", xlab = "Age") # peak at 60-65 (median age onset is 62)
+hist(d_process$tau_HP   , breaks = 100, main = "Healthy to preclinical", xlab = "Age") # 10-15 by age 75
+
 hist(d_process$sojourn_P, breaks = 100, main = "Sojourn time in preclinical", xlab = "Waiting time") # peak at 4-6 years
 ```
 
@@ -77,15 +81,20 @@ for(i in 1 : n){  print(i) # person i
   
   set.seed(-i)
   
-  tau_HP <- d_process$tau_HP[i]
-  tau_PC <- d_process$tau_PC[i]
+  tau_HP    <- d_process$tau_HP[i]
+  tau_PC    <- d_process$tau_PC[i]
+  age_death <- Inf #40 + rexp(1,1/50) 
   
   for(j in 1 : length(ages_screen)){ # screen j
     
     age_screen <- ages_screen[j]
   
-    if(tau_PC < age_screen){
-      d_obs_clinical[i, ] <- tibble(i, TRUE, tau_PC)
+    if(min(age_death, tau_PC) < age_screen){
+      if(tau_PC < age_death){ # clinical cancer first
+        d_obs_censor[i, ] <- tibble(i, "clinical", tau_PC)
+      }else if(age_death < tau_PC){ # death first
+        d_obs_censor[i, ] <- tibble(i, "censored", age_death)
+      }
       break
     }
   
@@ -99,8 +108,8 @@ for(i in 1 : n){  print(i) # person i
         screen_detected = screen_detected
         )
     
-    if(screen_detected){
-      d_obs_clinical[i, ] <- tibble(i, FALSE, NA)
+    if(screen_detected){ # positive screen first
+      d_obs_censor[i, ] <- tibble(i, "screen", age_screen)
       break
     }
     
@@ -112,169 +121,54 @@ for(i in 1 : n){  print(i) # person i
 ```{r}
 d_process
 d_obs_screen
-d_obs_clinical
+d_obs_censor
 ```
 
 ```{r}
-which(d_obs_clinical$clinical_detected)
-id <- 12 # 11 15 18 22 84 86
-d_process %>% filter(person_id == id)
+count(d_obs_censor, censor_type)
+count(d_process, indolent)
+which(d_obs_censor$censor_type == "clinical")
+which(d_obs_censor$censor_type == "censored")
+which(d_obs_censor$censor_type == "screen")
+```
+
+```{r}
+id <- 1 # 11 (clinical), 9 (censored), 1 (screen)
+d_obs_censor %>% filter(person_id == id)
+d_process    %>% filter(person_id == id)
 d_obs_screen %>% filter(person_id == id)
-d_obs_clinical %>% filter(person_id == id)
 ```
 
-## Inference
+## Output
 
-```{r}
-dlog_sojourn_H <- function(sojourn_H, theta){
-  dweibull2(
-    sojourn_H, 
-    shape = theta$shape_H, rate = theta$rate_H,
-    log = TRUE
-    ) %>%
-    sum()
-}
+```{r, eval=F}
 
-dlog_sojourn_H <- function(sojourn_H, theta){
-  dweibull2(
-    sojourn_H, 
-    shape = theta$shape_H, rate = theta$rate_H, 
-    log = TRUE
-    ) %>%
-    sum()
-}
+plot(RATE_H, type = "l")
+plot(RATE_P, type = "l")
+plot(PSY   , type = "l")
+plot(BETA  , type = "l")
 
-dlog_psy <- function(indolent, theta){
-  dbinom(
-    sum(indolent), length(indolent), 
-    prob = theta$psy, log = TRUE
-    )
-}
+# Output
+x <- seq(0.00001, max(RATE_H, RATE_P, BETA, PSY), 0.0001)
+hist(RATE_H, freq=F); abline(v=theta$rate_H, col = "red"); lines(x, dgamma(x, prior$shape_H, prior$rate_H))
+hist(RATE_P, freq=F); abline(v=theta$rate_P, col = "red"); lines(x, dgamma(x, prior$shape_P, prior$rate_P))
+hist(PSY   , freq=F); abline(v=theta$psy   , col = "red"); lines(x, dbeta(x, prior$a_psy, prior$b_psy))
+hist(BETA  , freq=F); abline(v=theta$beta  , col = "red"); lines(x, dbeta(x, prior$a_beta, prior$b_beta))
 
-dlog_beta <- function(d_obs_screen, theta, tau_HP, tau_PC){
-  
-  n <- length(tau_HP)
-  n_screen <- 0
-  
-  
-  for(i in 1 : n){
-    d_obs_screen_i <- d_obs_screen %>% filter(person_id == i)
-    age_screen_i   <- d_obs_screen_i$age_screen
-    n_screen_i     <- sum(between(age_screen_i, tau_HP[i], tau_PC[i]))
-  
-    n_screen <- n_screen + n_screen_i
-  }
-  
-  n_screen_detected <- sum(d_obs_screen$screen_detected)
-  
-  dbinom(
-    n_screen_detected, n_screen, 
-    prob = theta$beta, log = TRUE
-    )
-}
-```
+coda::effectiveSize(RATE_H)
+coda::effectiveSize(RATE_P)
+coda::effectiveSize(PSY)
+coda::effectiveSize(BETA)
 
-```{r}
-psy_range <- seq(0.01, 0.2, length.out = 200)
-m <- length(psy_range)
-dlog <- numeric(m)
-theta_temp <- theta
+runtime <- runtime$toc - runtime$tic
+coda::effectiveSize(RATE_H)/runtime
+coda::effectiveSize(RATE_P)/runtime
+coda::effectiveSize(PSY)/runtime
+coda::effectiveSize(BETA)/runtime
 
-for(k in 1 : m){
-  theta_temp[["psy"]] <- psy_range[k]
-  dlog[k] <- dlog_psy(d_process$indolent, theta_temp)
-}
+acf(RATE_H)
+acf(RATE_P)
+acf(PSY)
+acf(BETA)
 
-plot(psy_range, dlog, type = "l"); abline(v = theta$psy, col = "red")
-```
-
-```{r}
-beta_range <- seq(0.6, 0.9, length.out = 25)
-m <- length(beta_range)
-dlog <- numeric(m)
-theta_temp <- theta
-
-for(k in 1 : m){
-  print(k)
-  theta_temp[["beta"]] <- beta_range[k]
-  dlog[k] <- dlog_beta(d_obs_screen, theta_temp, d_process$tau_HP, d_process$tau_PC)
-}
-
-plot(beta_range, dlog, type = "l"); abline(v = theta$beta, col = "red")
-```
-
-```{r}
-
-```
-
-```{r}
-compute_loglik_process <- function(d_process, theta){
-  
-  
-  
-  
-  loglik_H <- d_process %>%
-    mutate(
-      sojourn_H = tau_HP - age_start,
-      loglik_H = dexp(sojourn_H, rate = theta$rate_H, log = TRUE),
-      ) %>%
-    pull(loglik_H) %>%
-    sum()
-  
-  loglik_P <- d_process %>%
-    filter(is.finite(tau_PC)) %>%
-    mutate(
-      sojourn_P = tau_PC - tau_HP,
-      loglik_P = dexp(sojourn_P, rate = theta$rate_P, log = TRUE),
-      ) %>%
-    pull(loglik_P) %>%
-    sum()
-  
-  loglik_H + loglik_P
-  
-}
-compute_loglik_process(d_process, theta)
-
-rates  <- seq(0.01, 0.5, by = 0.01)
-m      <- length(rates)
-loglik <- numeric(m)
-for(i in 1 : m){
-  rate      <- rates[i]
-  loglik[i] <- compute_loglik_process(d_process, list(rate_H = rate, rate_P = 0.1))
-}
-tibble(rates, loglik) %>%
-  ggplot() + 
-  geom_line(aes(x = rates, y = loglik))
-
-for(i in 1 : m){
-  rate      <- rates[i]
-  loglik[i] <- compute_loglik_process(d_process, list(rate_H = 0.1, rate_P = rate))
-}
-tibble(rates, loglik) %>%
-  ggplot() + 
-  geom_line(aes(x = rates, y = loglik))
-```
-
-```{r}
-compute_loglik_emission <- function(d_emission, theta){
-  
-  d_emission %>%
-    filter(compartment == "P") %>%
-    pull(output) %>%
-    dbinom(size = 1, prob = theta$beta, log = TRUE) %>%
-    sum()
-  
-}
-compute_loglik_emission(d_emission, theta)
-
-probs  <- seq(0.5, 0.999, by = 0.01)
-m      <- length(probs)
-loglik <- numeric(m)
-for(i in 1 : m){
-  prob      <- probs[i]
-  loglik[i] <- compute_loglik_emission(d_emission, list(beta = prob))
-}
-tibble(probs, loglik)  %>%
-  ggplot() + 
-  geom_line(aes(x = probs, y = loglik))
 ```
