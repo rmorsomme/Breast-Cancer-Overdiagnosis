@@ -7,31 +7,36 @@ editor_options:
 
 ```{r}
 rm(list = ls())
-library(tidyverse)
-library(tictoc)
+
 source("helpers.R")
+
+#setup parallel backend to use many processors
+#cl <- makeCluster(detectCores()-2) #not to overload your computer
+#registerDoParallel(cl)
+  
+library(tidyverse)
 ```
 
 ```{r}
 theta <- list(
-  rate_H = 0.001 , shape_H = 2,
+  rate_H = 0.0005, shape_H = 2,
   rate_P = 0.0015, shape_P = 4,
   beta   = 0.814 , psy     = 0.045
 )
 
 prior <- list(
   rate_H = 1, shape_H = 1, # gamma(shape_H, rate_H) prior on Weibull rate for H
-  rate_P = 10, shape_P = .01, # gamma(shape_P, rate_P) prior on Weibull rate for P
+  rate_P = 1000, shape_P = 1, # gamma(shape_P, rate_P) prior on Weibull rate for P
   a_psy  = 1, b_psy   = 1, # beta(a_psy, b_psy) prior on beta
-  a_beta = 1, b_beta  = 1  # beta(a_beta, b_beta) prior on psy
+  a_beta = 8, b_beta  = 2  # beta(a_beta, b_beta) prior on psy
 )
 
 age_start <- 40
 
-ages_screen <- seq(age_start, 150, by = 2)
+ages_screen <- seq(age_start, 150, by = 3)
 n_screen <- length(ages_screen)
 
-n <- 1e3
+n <- 1e2
 d_process <- tibble(
   person_id = numeric(n), age_start = numeric(n), 
   sojourn_H = numeric(n), tau_HP    = numeric(n),
@@ -83,7 +88,7 @@ for(i in 1 : n){  print(i) # person i
   
   tau_HP    <- d_process$tau_HP[i]
   tau_PC    <- d_process$tau_PC[i]
-  age_death <- Inf #40 + rexp(1,1/50) 
+  age_death <- min(40 + rexp(1,1/20), 120)
   
   for(j in 1 : length(ages_screen)){ # screen j
     
@@ -98,7 +103,7 @@ for(i in 1 : n){  print(i) # person i
       break
     }
   
-    compartment     <- compute_compartment(age_screen, tau_HP, tau_PC)
+    compartment     <- compute_compartment(age_screen, tau_HP)
     screen_detected <- screen_result(compartment, theta)
     
     d_obs_screen    <- d_obs_screen %>% 
@@ -122,53 +127,19 @@ for(i in 1 : n){  print(i) # person i
 d_process
 d_obs_screen
 d_obs_censor
-```
-
-```{r}
-count(d_obs_censor, censor_type)
+count(d_obs_censor, censor_type) # (80-2-18)
 count(d_process, indolent)
-which(d_obs_censor$censor_type == "clinical")
-which(d_obs_censor$censor_type == "censored")
-which(d_obs_censor$censor_type == "screen")
 ```
 
 ```{r}
-id <- 1 # 11 (clinical), 9 (censored), 1 (screen)
-d_obs_censor %>% filter(person_id == id)
-d_process    %>% filter(person_id == id)
-d_obs_screen %>% filter(person_id == id)
+id_clinical <- which(d_obs_censor$censor_type == "clinical")
+id_censor   <- which(d_obs_censor$censor_type == "censored")
+id_screen   <- which(d_obs_censor$censor_type == "screen")
 ```
 
-## Output
-
-```{r, eval=F}
-
-plot(RATE_H, type = "l")
-plot(RATE_P, type = "l")
-plot(PSY   , type = "l")
-plot(BETA  , type = "l")
-
-# Output
-x <- seq(0.00001, max(RATE_H, RATE_P, BETA, PSY), 0.0001)
-hist(RATE_H, freq=F); abline(v=theta$rate_H, col = "red"); lines(x, dgamma(x, prior$shape_H, prior$rate_H))
-hist(RATE_P, freq=F); abline(v=theta$rate_P, col = "red"); lines(x, dgamma(x, prior$shape_P, prior$rate_P))
-hist(PSY   , freq=F); abline(v=theta$psy   , col = "red"); lines(x, dbeta(x, prior$a_psy, prior$b_psy))
-hist(BETA  , freq=F); abline(v=theta$beta  , col = "red"); lines(x, dbeta(x, prior$a_beta, prior$b_beta))
-
-coda::effectiveSize(RATE_H)
-coda::effectiveSize(RATE_P)
-coda::effectiveSize(PSY)
-coda::effectiveSize(BETA)
-
-runtime <- runtime$toc - runtime$tic
-coda::effectiveSize(RATE_H)/runtime
-coda::effectiveSize(RATE_P)/runtime
-coda::effectiveSize(PSY)/runtime
-coda::effectiveSize(BETA)/runtime
-
-acf(RATE_H)
-acf(RATE_P)
-acf(PSY)
-acf(BETA)
-
+```{r}
+id <- id_censor[1]
+d_process    %>% filter(person_id == id)
+d_obs_censor %>% filter(person_id == id)
+d_obs_screen %>% filter(person_id == id)
 ```
