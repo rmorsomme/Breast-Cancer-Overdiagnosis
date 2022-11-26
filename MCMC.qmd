@@ -1,0 +1,106 @@
+---
+title: "MCMC"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#setup parallel backend to use many processors
+#cl <- makeCluster(detectCores()-2) #not to overload your computer
+#registerDoParallel(cl)
+  
+library(tidyverse)
+library(tictoc)
+#library(foreach)
+#library(doParallel)
+```
+
+## MCMC
+
+```{r}
+set.seed(1)
+n <- nrow(d_process) # number of individuals
+m <- 1e3        # number of MCMC iterations
+out <- MCMC(m=m) 
+save(list="out", file=paste0("MCMC-n", n, "-m", m, ".RDATA"))
+```
+
+## Output -- theta
+
+```{r}
+THETA <- out$THETA
+
+RATE_H <- THETA$RATE_H
+RATE_P <- THETA$RATE_P
+PSY    <- THETA$PSY
+BETA   <- THETA$BETA
+
+plot(RATE_H, type = "l")
+plot(RATE_P, type = "l")
+plot(PSY   , type = "l")
+plot(BETA  , type = "l")
+
+# Output
+x <- seq(1e-5, max(RATE_H, RATE_P, BETA, PSY), 0.0001)
+hist(RATE_H, freq=F, breaks=20); abline(v=theta$rate_H, col = "red"); lines(x, dgamma(x, prior$shape_H, prior$rate_H))
+hist(RATE_P, freq=F, breaks=20); abline(v=theta$rate_P, col = "red"); lines(x, dgamma(x, prior$shape_P, prior$rate_P))
+hist(PSY   , freq=F, breaks=20); abline(v=theta$psy   , col = "red"); lines(x, dbeta(x, prior$a_psy, prior$b_psy))
+hist(BETA  , freq=F, breaks=20); abline(v=theta$beta  , col = "red"); lines(x, dbeta(x, prior$a_beta, prior$b_beta))
+
+acf(RATE_H)
+acf(RATE_P)
+acf(PSY)
+acf(BETA)
+
+coda::effectiveSize(RATE_H)
+coda::effectiveSize(RATE_P)
+coda::effectiveSize(PSY)
+coda::effectiveSize(BETA)
+
+runtime <- out$runtime
+run_time <- runtime$toc - runtime$tic
+coda::effectiveSize(RATE_H)/run_time
+coda::effectiveSize(RATE_P)/run_time
+coda::effectiveSize(PSY)/run_time
+coda::effectiveSize(BETA)/run_time
+
+
+THETA <- tibble(log(RATE_P), log(RATE_H), BETA, PSY)
+plot(THETA)
+round(cor(THETA), 2)
+```
+
+## Output -- latent data
+
+```{r}
+TAU_HP <- out$TAU_HP
+TAU_HP_inf <- is.infinite(TAU_HP)
+
+ids <- which(d_obs_censor$censor_type=="clinical")
+i <- ids[2]
+filter(d_obs_screen, person_id == i); d_process[i,]; d_obs_censor[i,]
+plot(TAU_HP_inf[,i], type="l")
+plot(TAU_HP[,i], type="l")
+hist(TAU_HP[,i], breaks = 200) # propose from truncated Weibull (Weibull for P)
+acf(TAU_HP[,i])
+mean(TAU_HP[2:m-1,i] != TAU_HP[2:m,i]) # acceptance rate
+
+ids <- which(d_obs_censor$censor_type=="screen")
+i <- ids[2]
+filter(d_obs_screen, person_id == i); d_process[i,]; d_obs_censor[i,]
+plot(TAU_HP_inf[,i], type="l")
+plot(TAU_HP[,i], type="l")
+hist(TAU_HP[,i], breaks=50)
+acf(TAU_HP[,i])
+mean(TAU_HP[2:m-1,i] != TAU_HP[2:m,i]) # acceptance rate
+
+ids <- which(d_obs_censor$censor_type=="censored")
+i <- ids[order(d_obs_censor$censor_time[ids])[length(ids)]]
+#i <- ids[1]
+d_process[i,]; filter(d_obs_screen, person_id == i); d_obs_censor[i,]
+plot(TAU_HP_inf[,i], type="l")
+mean(TAU_HP_inf[,i]) # is this plausaible?
+plot(TAU_HP[!TAU_HP_inf[,i],i], type="l")
+```
