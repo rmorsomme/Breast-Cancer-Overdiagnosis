@@ -36,7 +36,7 @@ age_start <- 40
 ages_screen <- seq(age_start, 150, by = 3)
 n_screen <- length(ages_screen)
 
-n <- 1e2
+n <- 1e3
 d_process <- tibble(
   person_id = numeric(n), age_start = numeric(n), 
   sojourn_H = numeric(n), tau_HP    = numeric(n),
@@ -127,19 +127,13 @@ for(i in 1 : n){  print(i) # person i
 d_process
 d_obs_screen
 d_obs_censor
-count(d_obs_censor, censor_type) # (80-2-18)
+count(d_obs_censor, censor_type) # (0.8-0.02-0.18)
 count(d_process, indolent)
 ```
 
 ```{r}
-id_clinical <- which(d_obs_censor$censor_type == "clinical")
-id_censor   <- which(d_obs_censor$censor_type == "censored")
-id_screen   <- which(d_obs_censor$censor_type == "screen")
-```
-
-```{r}
-id <- id_censor[1]
-d_process    %>% filter(person_id == id)
-d_obs_censor %>% filter(person_id == id)
-d_obs_screen %>% filter(person_id == id)
+i <- which(d_obs_censor$censor_type == "clinical")[1]
+d_process    %>% filter(person_id == i)
+d_obs_censor %>% filter(person_id == i)
+d_obs_screen %>% filter(person_id == i)
 ```

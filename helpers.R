@@ -180,135 +180,144 @@ dlog_likelihood_i <- function(tau_HP_i, indolent_i, d_obs_screen_i, d_obs_censor
 
 #
 # MH ####
-rprop_tau_HP <- function(d_obs_screen_i, d_obs_censor_i, theta){
+
+compute_endpoints <- function(screens_i, censor_i){
   
-  # same code as in dprop_tau_HP
-  {
-    censor_type <- d_obs_censor_i$censor_type
-    
-    # construct interval (t_i, t_{i+1}]
-    age_screen <- d_obs_screen_i$age_screen # age at screens
-    
-    if(censor_type == "clinical"){ # if clinical, add tau_PC as endpoint of last interval
-      age_screen <- c(age_screen, d_obs_censor_i$censor_time)
-    }else if(censor_type == "censored"){ # if censored, add Inf as endpoint of last interval
-      age_screen <- c(age_screen, d_obs_censor_i$censor_time, Inf)
-    }
-    
-    dt         <- diff(age_screen) # length of intervals
-    K          <- length(dt)       # number of intervals
-    
-    # construct probability vector p
-    prob <- if(censor_type == "screen"  ){
-      
-      theta$beta * (1-theta$beta)^((K-1):0) * dt[1:K]
-      
-    }  else if(censor_type == "clinical"){
-      
-      (1-theta$beta)^((K-1):0) * dt[1:K]
-      
-    } else if(censor_type == "censored"){
-      
-      prob_sojourn_H <- pweibull2_ab(
-        age_screen[1:K    ] - 40, 
-        age_screen[1:K + 1] - 40, 
-        shape = theta$shape_H, rate = theta$rate_H, 
-        log = FALSE
-      )
-      
-      prob_screens <- (1-theta$beta)^((K-1):0)
-      
-      prob_sojourn_H * prob_screens
-      
-    }
+  censor_type <- censor_i$censor_type
+  censor_time <- censor_i$censor_time
   
-    prob <- prob/sum(prob) # normalize probabilities
-  }  # end-same code as in dprop_tau_HP
+  age_screen <- screens_i$age_screen # age at screens
+  
+  # construct endpoints of intervals (t_i, t_{i+1}]
+  endpoints <- if(censor_type == "screen"){ # if screen, age_screen are endpoints
+    
+    age_screen 
+    
+  }else if(censor_type == "clinical"){ # if clinical, add tau_PC as endpoint of last interval
+    
+    c(age_screen, censor_time     )
+    
+  }else if(censor_type == "censored"){ # if censored, add tau_PC and Inf as endpoints
+    
+    c(age_screen, censor_time, Inf)
+    
+  }
+  
+  return(endpoints)
+  
+}
+
+compute_prob <- function(d_obs_censor_i, endpoints_i, theta){
+  
+  censor_type <- d_obs_censor_i$censor_type
+  
+  K <- length(endpoints_i) - 1 # number of intervals
+  
+  # compute prob of interval based on  (ignoring the mommograms)
+  prob_interval <- if(censor_type == "screen"  ){
+    
+    #diff(endpoints_i) # length of intervals
+    pweibull2_ab(
+      endpoints_i[1:K    ] - 40, 
+      endpoints_i[1:K + 1] - 40, 
+      shape = theta$shape_H, rate = theta$rate_H, 
+      log = FALSE
+    )
+    
+  } else if(censor_type == "clinical"){
+    
+    #diff(endpoints_i) # length of intervals
+    pweibull2_ab(
+      endpoints_i[1:K    ] - 40, 
+      endpoints_i[1:K + 1] - 40, 
+      shape = theta$shape_H, rate = theta$rate_H, 
+      log = FALSE
+    )
+    
+  } else if(censor_type == "censored"){
+    
+    pweibull2_ab(
+      endpoints_i[1:K    ] - 40, 
+      endpoints_i[1:K + 1] - 40, 
+      shape = theta$shape_H, rate = theta$rate_H, 
+      log = FALSE
+    )
+    
+  }
+  
+  prob_screens <- if(censor_type == "screen"  ){
+    
+    #prob_interval <- diff(endpoints_i) # length of intervals
+    (1-theta$beta)^((K-1):0) * theta$beta
+    
+  } else if(censor_type == "clinical"){
+    
+    (1-theta$beta)^((K-1):0)
+    
+  } else if(censor_type == "censored"){
+    
+    (1-theta$beta)^((K-1):0)
+    
+  }
+  
+  prob <- prob_interval * prob_screens
+  prob <- prob/sum(prob) # normalize probabilities
+  
+  return(prob)
+  
+  
+}
+
+rprop_tau_HP <- function(d_obs_censor_i, endpoints_i, prob, theta){
+  
+  K <- length(prob) # number of intervals
+  
+  # sample interval
+  k_new      <- sample.int(K, 1, prob = prob) # sample interval
   
   # sample tau_HP
-  k_new      <- sample.int(K, 1, prob = prob) # sample interval
-  tau_HP_new <- if(censor_type == "censored" & k_new == K){
+  tau_HP_new <- if(d_obs_censor_i$censor_type == "censored" & k_new == K){
     Inf # tau_HP > time_censor
   }else{
-    runif(1, age_screen[k_new], age_screen[k_new+1]) # sample tau_HP in the chosen interval
+    runif(1, endpoints_i[k_new], endpoints_i[k_new+1]) # sample tau_HP in the chosen interval
   }
   
   return(tau_HP_new)
 
 }
 
-dlog_prop_tau_HP <- function(tau_HP, d_obs_screen_i, d_obs_censor_i, theta){
+dlog_prop_tau_HP <- function(tau_HP, d_obs_censor_i, endpoints_i, prob, theta){
   
-  # same code as in rprop_tau_HP
-  {
-    censor_type <- d_obs_censor_i$censor_type
-    
-    # construct interval (t_i, t_{i+1}]
-    age_screen <- d_obs_screen_i$age_screen # age at screens
-    
-    if(censor_type == "clinical"){ # if clinical, add tau_PC as endpoint of last interval
-      age_screen <- c(age_screen, d_obs_censor_i$censor_time)
-    }else if(censor_type == "censored"){ # if censored, add Inf as endpoint of last interval
-      age_screen <- c(age_screen, Inf)
-    }
-    
-    dt         <- diff(age_screen) # length of intervals
-    K          <- length(dt)       # number of intervals
-    
-    # construct probability vector p
-    prob <- if(censor_type == "screen"  ){
-      
-      theta$beta * (1-theta$beta)^((K-1):0) * dt[1:K]
-      
-    }  else if(censor_type == "clinical"){
-      
-      (1-theta$beta)^((K-1):0) * dt[1:K]
-      
-    } else if(censor_type == "censored"){
-      
-      prob_sojourn_H <- pweibull2_ab(
-        age_screen[1:K    ] - 40, 
-        age_screen[1:K + 1] - 40, 
-        shape = theta$shape_H, rate = theta$rate_H, 
-        log = FALSE
-      )
-      
-      prob_screens <- (1-theta$beta)^((K-1):0)
-      
-      prob_sojourn_H * prob_screens
-      
-    }
-    
-    prob <- prob/sum(prob) # normalize probabilities
-      
-    } # end-same code as in rprop_tau_HP
+  K    <- length(prob) # number of intervals
   
   # find k_new
-  k_new <- sum(age_screen < tau_HP) 
+  k_new <- sum(endpoints_i < tau_HP) 
   
-  if(censor_type == "censored" & k_new == K){
+  if(d_obs_censor_i$censor_type == "censored" & k_new == K){
     log(prob[k_new]) # log(categorical(p)
   }else{
-    log(prob[k_new]) - log(age_screen[k_new+1] - age_screen[k_new]) # log(categorical(p) * uniform(dt_k))
+    log(prob[k_new]) - log(endpoints_i[k_new+1] - endpoints_i[k_new]) # log(categorical(p) * uniform(dt_k))
   }
   
 }
 
-MH_tau_PH <- function(d_obs_screen_i, d_obs_censor_i, indolent_i, tau_HP_i, theta){
+MH_tau_PH <- function(d_obs_screen_i, d_obs_censor_i, endpoints_i, indolent_i, tau_HP_i, theta){
   
   # data for person i
   #d_obs_screen_i <- d_obs_screen %>% filter(person_id == i)
   #d_obs_censor_i <- d_obs_censor %>% filter(person_id == i)
   #indolent_i     <- indolent[i] 
+  #tau_HP_i <- tau_HP[i]
   
   # propose new tau_HP
   tau_HP_cur <- tau_HP_i
-  tau_HP_new <- rprop_tau_HP(d_obs_screen_i, d_obs_censor_i, theta)
+  prob       <- compute_prob(d_obs_censor_i, endpoints_i, theta)
+  tau_HP_new <- rprop_tau_HP(d_obs_censor_i, endpoints_i, prob, theta)
   if(tau_HP_new == tau_HP_cur)  return(tau_HP_cur)
   
   # M-H acceptance ratio
-  dlog_prop_cur  <- dlog_prop_tau_HP (tau_HP_cur, d_obs_screen_i, d_obs_censor_i, theta)
-  dlog_prop_new  <- dlog_prop_tau_HP (tau_HP_new, d_obs_screen_i, d_obs_censor_i, theta)
+  dlog_prop_cur  <- dlog_prop_tau_HP (tau_HP_cur, d_obs_censor_i, endpoints_i, prob, theta)
+  dlog_prop_new  <- dlog_prop_tau_HP (tau_HP_new, d_obs_censor_i, endpoints_i, prob, theta)
   dlog_lik_cur   <- dlog_likelihood_i(tau_HP_cur, indolent_i, d_obs_screen_i, d_obs_censor_i, theta)
   dlog_lik_new   <- dlog_likelihood_i(tau_HP_new, indolent_i, d_obs_screen_i, d_obs_censor_i, theta)
 
@@ -344,8 +353,9 @@ MCMC <- function(m=100){
   d_obs_censor_tbl <- d_obs_censor %>% nest(censor = censor_type:censor_time)
   screens   <- d_obs_screen_tbl$screens
   censoring <- d_obs_censor_tbl$censor 
+  endpoints <- list(screens, censoring) %>% pmap(compute_endpoints)
   
-  
+  # MCMC
   tic()
   for(n in 1 : m){ print(n)
     
@@ -359,21 +369,14 @@ MCMC <- function(m=100){
     
     # update latent data
     #foreach(i=1:n_obs, .packages="tidyverse") %dopar% {
-    #  source("helpers.R")
-    tau_HP <- list(screens, censoring, indolent, tau_HP) %>%
+    tau_HP <- list(screens, censoring, endpoints, indolent, tau_HP) %>%
       pmap_dbl(MH_tau_PH, theta_tmp)
     
     #for(i in 1 : n_obs){ # this for-loop should be done in parallel
-    #  tau_HP_test2[i] <- MH_tau_PH(
-    #    d_obs_screen_tbl$screens[[i]], d_obs_censor[i,], indolent[i], tau_HP[i], theta_tmp
+    #  tau_HP[i] <- MH_tau_PH(
+    #    screens[[i]], censoring[[i]], indolent[i], tau_HP[i], theta_tmp
     #    )
-      #indolent[i] <- MH_indolent()
     #}
-    
-    #print(paste0("prop of Inf:", mean(is.infinite(tau_HP_tmp) & is.infinite(tau_HP)),
-    #             " - prop of update:", mean(tau_HP_tmp != tau_HP)
-    #             ))
-    #tau_HP_tmp <- tau_HP
     
     RATE_H[n ] <- rate_H
     RATE_P[n ] <- rate_P

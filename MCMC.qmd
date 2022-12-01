@@ -13,6 +13,7 @@ editor_options:
   
 library(tidyverse)
 library(tictoc)
+#library(furrr)
 #library(foreach)
 #library(doParallel)
 ```
@@ -22,15 +23,20 @@ library(tictoc)
 ```{r}
 set.seed(1)
 n <- nrow(d_process) # number of individuals
-m <- 1e3        # number of MCMC iterations
-out <- MCMC(m=m) 
-save(list="out", file=paste0("MCMC-n", n, "-m", m, ".RDATA"))
+m <- 1e2       # number of MCMC iterations
+
+#plan(multisession, workers = 7) # set the number of CPU cores to use when parallel processing
+
+out4 <- MCMC(m=m) 
+#profvis::profvis({out <- MCMC(m=m) }, interval =0.001)
+save(list="out2", file=paste0("MCMC2-n", n, "-m", m, ".RDATA"))
 ```
 
 ## Output -- theta
 
 ```{r}
-THETA <- out$THETA
+load(paste0("MCMC-n", n, "-m", m, ".RDATA"))
+THETA <- out3$THETA
 
 RATE_H <- THETA$RATE_H
 RATE_P <- THETA$RATE_P
@@ -59,7 +65,7 @@ coda::effectiveSize(RATE_P)
 coda::effectiveSize(PSY)
 coda::effectiveSize(BETA)
 
-runtime <- out$runtime
+runtime <- out2$runtime
 run_time <- runtime$toc - runtime$tic
 coda::effectiveSize(RATE_H)/run_time
 coda::effectiveSize(RATE_P)/run_time
@@ -67,40 +73,54 @@ coda::effectiveSize(PSY)/run_time
 coda::effectiveSize(BETA)/run_time
 
 
-THETA <- tibble(log(RATE_P), log(RATE_H), BETA, PSY)
-plot(THETA)
+THETA <- tibble(log(RATE_H), log(RATE_P), BETA, PSY)
 round(cor(THETA), 2)
+plot(THETA)
 ```
 
 ## Output -- latent data
 
 ```{r}
-TAU_HP <- out$TAU_HP
-TAU_HP_inf <- is.infinite(TAU_HP)
+TAU_HP <- out2$TAU_HP
+TAU_HP_inf <- is.infinite(TAU_HP) 
 
 ids <- which(d_obs_censor$censor_type=="clinical")
-i <- ids[2]
+i <- ids[16]
 filter(d_obs_screen, person_id == i); d_process[i,]; d_obs_censor[i,]
 plot(TAU_HP_inf[,i], type="l")
 plot(TAU_HP[,i], type="l")
-hist(TAU_HP[,i], breaks = 200) # propose from truncated Weibull (Weibull for P)
+hist(TAU_HP[,i], breaks = 200, xlim=c(max(40, max(TAU_HP[,i]) - 15), max(TAU_HP[,i]))) # propose from truncated Weibull/triangular distribution instead of uniform?
 acf(TAU_HP[,i])
-mean(TAU_HP[2:m-1,i] != TAU_HP[2:m,i]) # acceptance rate
+
+rate_accept <- numeric(length(ids)) 
+for(i in 1:length(ids)){ # acceptance rate
+  rate_accept[i] <- mean(TAU_HP[2:m-1,ids[i]] != TAU_HP[2:m,ids[i]])
+}
+boxplot(rate_accept); min(rate_accept)
+which.min(rate_accept); which.max(rate_accept)
 
 ids <- which(d_obs_censor$censor_type=="screen")
-i <- ids[2]
+i <- ids[19]
 filter(d_obs_screen, person_id == i); d_process[i,]; d_obs_censor[i,]
 plot(TAU_HP_inf[,i], type="l")
 plot(TAU_HP[,i], type="l")
 hist(TAU_HP[,i], breaks=50)
 acf(TAU_HP[,i])
-mean(TAU_HP[2:m-1,i] != TAU_HP[2:m,i]) # acceptance rate
+
+rate_accept <- numeric(length(ids)) 
+for(i in 1:length(ids)){ # acceptance rate
+  rate_accept[i] <- mean(TAU_HP[2:m-1,ids[i]] != TAU_HP[2:m,ids[i]])
+}
+boxplot(rate_accept); min(rate_accept)
+which.min(rate_accept); which.max(rate_accept)
 
 ids <- which(d_obs_censor$censor_type=="censored")
 i <- ids[order(d_obs_censor$censor_time[ids])[length(ids)]]
-#i <- ids[1]
+i <- ids[1]
 d_process[i,]; filter(d_obs_screen, person_id == i); d_obs_censor[i,]
 plot(TAU_HP_inf[,i], type="l")
-mean(TAU_HP_inf[,i]) # is this plausaible?
 plot(TAU_HP[!TAU_HP_inf[,i],i], type="l")
+
+prop_inf <- colMeans(TAU_HP_inf[,ids])
+boxplot(prop_inf) # is this plausible?
 ```
