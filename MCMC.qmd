@@ -29,7 +29,7 @@ m <- 1e3       # number of MCMC iterations
 
 out <- MCMC(m=m) 
 #profvis::profvis({out <- MCMC(m=m) }, interval =0.001)
-#save(list="out", file=paste0("MCMC-n", n, "-m", m, ".RDATA"))
+save(list="out", file=paste0("MCMC-n", n, "-m", m, ".RDATA"))
 ```
 
 ## Output -- theta

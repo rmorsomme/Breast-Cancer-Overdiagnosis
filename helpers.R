@@ -199,8 +199,8 @@ compute_prob <- function(censor_type_i, endpoints_i, theta){
     
     #diff(endpoints_i) # length of intervals
     pweibull_ab(
-      endpoints_i[1:K    ] - 40, 
-      endpoints_i[1:K + 1] - 40, 
+      endpoints_i[1:K    ] - 40,
+      endpoints_i[1:K + 1] - 40,
       shape = theta$shape_H, scale = theta$scale_H
     )
     
@@ -208,8 +208,8 @@ compute_prob <- function(censor_type_i, endpoints_i, theta){
     
     #diff(endpoints_i) # length of intervals
     pweibull_ab(
-      endpoints_i[1:K    ] - 40, 
-      endpoints_i[1:K + 1] - 40, 
+      endpoints_i[1:K    ] - 40,
+      endpoints_i[1:K + 1] - 40,
       shape = theta$shape_H, scale = theta$scale_H
     )
     
