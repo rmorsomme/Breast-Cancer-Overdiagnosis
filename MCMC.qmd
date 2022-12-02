@@ -84,6 +84,7 @@ plot(THETA)
 TAU_HP     <- out$TAU_HP
 TAU_HP_inf <- is.infinite(TAU_HP) 
 
+# clinical
 ids <- which(d_obs_censor$censor_type=="clinical")
 i <- ids[21]
 filter(d_obs_screen, person_id == i); d_process[i,]; d_obs_censor[i,]
@@ -99,6 +100,7 @@ for(i in 1:length(ids)){ # acceptance rate
 boxplot(rate_accept); summary(rate_accept); which.min(rate_accept); which.max(rate_accept)
 plot(d_obs_censor$censor_time[ids], rate_accept)
 
+# screen
 ids <- which(d_obs_censor$censor_type=="screen")
 i <- ids[1]
 filter(d_obs_screen, person_id == i); d_process[i,]; d_obs_censor[i,]
@@ -114,6 +116,7 @@ for(i in 1:length(ids)){ # acceptance rate
 boxplot(rate_accept); summary(rate_accept); which.min(rate_accept); which.max(rate_accept)
 boxplot(rate_accept ~ d_obs_censor$censor_time[ids])
 
+# censored
 ids <- which(d_obs_censor$censor_type=="censored")
 i <- ids[1]
 d_process[i,]; filter(d_obs_screen, person_id == i); d_obs_censor[i,]

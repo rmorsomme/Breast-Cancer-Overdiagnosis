@@ -12,14 +12,22 @@ update_scales <- function(theta){
   return(theta)
 }
 
-pweibull_ab <- function(a, b, shape, scale, log = F){
-  pweibull(b, shape, scale, log.p = log, lower.tail = T) - 
-  pweibull(a, shape, scale, log.p = log, lower.tail = T)
+pweibull_ab <- function(a, b, shape, scale){
+  pweibull(b, shape, scale, lower.tail = T) - 
+  pweibull(a, shape, scale, lower.tail = T)
 }
 
 rweibul_trunc <- function(a, b, shape, scale){
   u <- runif(1, pweibull(a, shape, scale), pweibull(b, shape, scale))
   qweibull(u, shape, scale)
+}
+
+dweibul_trunc <- function(x, a, b, shape, scale, log = T){
+  if(log){
+    dweibull(x, shape, scale, log = T) - log(pweibull_ab(a, b, shape, scale))
+  }else{
+    dweibull(x, shape, scale, log = F) /     pweibull_ab(a, b, shape, scale)
+  }
 }
 
 #
@@ -234,7 +242,6 @@ compute_prob <- function(censor_type_i, censor_time_i, endpoints_i, theta){
   
   prob_screens <- if(censor_type_i == "screen"  ){
     
-    #prob_interval <- diff(endpoints_i) # length of intervals
     (1-theta$beta)^((K-1):0) * theta$beta
     
   } else if(censor_type_i == "clinical"){
@@ -254,42 +261,96 @@ compute_prob <- function(censor_type_i, censor_time_i, endpoints_i, theta){
   
 }
 
-rprop_tau_HP <- function(censor_type_i, endpoints_i, prob, theta){
+rprop_tau_HP <- function(censor_type_i, censor_time_i, endpoints_i, prob, theta){
   
   K <- length(prob) # number of intervals
   
   # sample interval
-  k_new      <- sample.int(K, 1, prob = prob) # sample interval
+  k_new <- sample.int(K, 1, prob = prob) # sample interval
   
-  # sample tau_HP
-  if(censor_type_i == "censored" & k_new == K){
+  # sample tau_HP in chosen interval
+  if(censor_type_i == "screen"  ){
     
-    return(Inf) # tau_HP > time_censor
+    sojourn_H_new <- rweibul_trunc(
+      endpoints_i[k_new] - 40, endpoints_i[k_new+1] - 40,
+      theta$shape_H, theta$scale_H
+      )
+    tau_HP_new <- 40 + sojourn_H_new
     
-  }else{
+  } else if(censor_type_i == "clinical"){
     
-    return(runif(1, endpoints_i[k_new], endpoints_i[k_new+1])) # sample tau_HP in the chosen interval
+    sojourn_P_new <- rweibul_trunc(
+      censor_time_i - endpoints_i[k_new+1], censor_time_i - endpoints_i[k_new],
+      theta$shape_P, theta$scale_P
+      )
+    tau_HP_new <- censor_time_i - sojourn_P_new
+    
+  } else if(censor_type_i == "censored"){
+    
+    if(k_new == K){
+      
+      tau_HP_new <- Inf # tau_HP > time_censor
+      
+    }else{ # tau_HP < time_censor
+      
+      sojourn_H_new <- rweibul_trunc(
+        endpoints_i[k_new] - 40, endpoints_i[k_new+1] - 40,
+        theta$shape_H, theta$scale_H
+      )
+      tau_HP_new <- 40 + sojourn_H_new
+      
+    }
     
   }
+  
+  return(tau_HP_new)
 
 }
 
-dlog_prop_tau_HP <- function(tau_HP, censor_type_i, endpoints_i, prob, theta){
+dlog_prop_tau_HP <- function(tau_HP, censor_type_i, censor_time_i, endpoints_i, prob, theta){
   
-  K    <- length(prob) # number of intervals
+  K      <- length(prob) # number of intervals
   
-  # find k_new
-  k_new <- sum(endpoints_i < tau_HP) 
+  # contribution of k_new
+  k_new  <- sum(endpoints_i < tau_HP)
+  dlog_k <- log(prob[k_new])
   
-  if(censor_type_i == "censored" & k_new == K){
+  # contribution of tau_HP
+  dlog_tau <- if(censor_type_i == "screen"  ){
     
-    log(prob[k_new]) # log(categorical(p)
+    sojourn_H <- tau_HP - 40
+    dweibul_trunc(
+      sojourn_H, endpoints_i[k_new] - 40, endpoints_i[k_new+1] - 40,
+      theta$shape_H, theta$scale_H, log = T
+      )
     
-  }else{
+  } else if(censor_type_i == "clinical"){
     
-    log(prob[k_new]) - log(endpoints_i[k_new+1] - endpoints_i[k_new]) # log(categorical(p) * uniform(dt_k))
- 
+    sojourn_P <- censor_time_i - tau_HP
+    dweibul_trunc(
+      sojourn_P, censor_time_i - endpoints_i[k_new+1], censor_time_i - endpoints_i[k_new],
+      theta$shape_P, theta$scale_P, log = T
+    )
+    
+  } else if(censor_type_i == "censored"){
+    
+    if(k_new == K){
+      
+      0
+      
+    }else{ # tau_HP < time_censor
+      
+      sojourn_H <- tau_HP - 40
+      dweibul_trunc(
+        sojourn_H, endpoints_i[k_new] - 40, endpoints_i[k_new+1] - 40,
+        theta$shape_H, theta$scale_H, log = T
+      )
+      
+    }
+    
   }
+  
+  return(dlog_k + dlog_tau)
   
 }
 
@@ -304,12 +365,12 @@ MH_tau_PH <- function(d_obs_screen_i, censor_type_i, censor_time_i, endpoints_i,
   # propose new tau_HP
   tau_HP_cur <- tau_HP_i
   prob       <- compute_prob(censor_type_i, censor_time_i, endpoints_i, theta)
-  tau_HP_new <- rprop_tau_HP(censor_type_i, endpoints_i, prob, theta)
+  tau_HP_new <- rprop_tau_HP(censor_type_i, censor_time_i, endpoints_i, prob, theta)
   if(tau_HP_new == tau_HP_cur)  return(tau_HP_cur)
   
   # M-H acceptance ratio
-  dlog_prop_cur  <- dlog_prop_tau_HP (tau_HP_cur, censor_type_i, endpoints_i, prob, theta)
-  dlog_prop_new  <- dlog_prop_tau_HP (tau_HP_new, censor_type_i, endpoints_i, prob, theta)
+  dlog_prop_cur  <- dlog_prop_tau_HP (tau_HP_cur, censor_type_i, censor_time_i, endpoints_i, prob, theta)
+  dlog_prop_new  <- dlog_prop_tau_HP (tau_HP_new, censor_type_i, censor_time_i, endpoints_i, prob, theta)
   dlog_lik_cur   <- dlog_likelihood_i(tau_HP_cur, indolent_i, d_obs_screen_i, censor_type_i, censor_time_i, theta)
   dlog_lik_new   <- dlog_likelihood_i(tau_HP_new, indolent_i, d_obs_screen_i, censor_type_i, censor_time_i, theta)
 
@@ -366,11 +427,12 @@ MCMC <- function(m=100){
     tau_HP <- list(screens, censor_type, censor_time, endpoints, indolent, tau_HP) %>%
       pmap_dbl(MH_tau_PH, theta_tmp)
     
-    #for(i in 1 : n_obs){ # this for-loop should be done in parallel
-    #  tau_HP[i] <- MH_tau_PH(
-    #    screens[[i]], censoring[[i]], indolent[i], tau_HP[i], theta_tmp
-    #    )
-    #}
+    # for(i in 1 : n_obs){ # this for-loop should be done in parallel
+    #   set.seed(i)
+    #   tau_HP_tmp[i] <- MH_tau_PH(
+    #     screens[[i]], censor_type[i], censor_time[i], endpoints[[i]], indolent[i], tau_HP[i], theta_tmp
+    #   )
+    # }
     
     RATE_H[n ] <- rate_H
     RATE_P[n ] <- rate_P
