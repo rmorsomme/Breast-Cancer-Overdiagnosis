@@ -189,7 +189,7 @@ compute_endpoints <- function(screens_i, censor_type_i, censor_time_i){
   
 }
 
-compute_prob <- function(censor_type_i, endpoints_i, theta){
+compute_prob <- function(censor_type_i, censor_time_i, endpoints_i, theta){
   
   
   K <- length(endpoints_i) - 1 # number of intervals
@@ -207,10 +207,15 @@ compute_prob <- function(censor_type_i, endpoints_i, theta){
   } else if(censor_type_i == "clinical"){
     
     #diff(endpoints_i) # length of intervals
+    # pweibull_ab(
+    #   endpoints_i[1:K    ] - 40,
+    #   endpoints_i[1:K + 1] - 40,
+    #   shape = theta$shape_H, scale = theta$scale_H
+    # )
     pweibull_ab(
-      endpoints_i[1:K    ] - 40,
-      endpoints_i[1:K + 1] - 40,
-      shape = theta$shape_H, scale = theta$scale_H
+      censor_time_i - endpoints_i[1:K + 1],
+      censor_time_i - endpoints_i[1:K    ],
+      shape = theta$shape_P, scale = theta$scale_P
     )
     
   } else if(censor_type_i == "censored"){
@@ -294,7 +299,7 @@ MH_tau_PH <- function(d_obs_screen_i, censor_type_i, censor_time_i, endpoints_i,
   
   # propose new tau_HP
   tau_HP_cur <- tau_HP_i
-  prob       <- compute_prob(censor_type_i, endpoints_i, theta)
+  prob       <- compute_prob(censor_type_i, censor_time_i, endpoints_i, theta)
   tau_HP_new <- rprop_tau_HP(censor_type_i, endpoints_i, prob, theta)
   if(tau_HP_new == tau_HP_cur)  return(tau_HP_cur)
   

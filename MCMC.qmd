@@ -23,7 +23,7 @@ library(tictoc)
 ```{r}
 set.seed(1)
 n <- nrow(d_process) # number of individuals
-m <- 1e3       # number of MCMC iterations
+m <- 1e3             # number of MCMC iterations
 
 #plan(multisession, workers = 7) # set the number of CPU cores to use when parallel processing
 
@@ -85,7 +85,7 @@ TAU_HP     <- out$TAU_HP
 TAU_HP_inf <- is.infinite(TAU_HP) 
 
 ids <- which(d_obs_censor$censor_type=="clinical")
-i <- ids[17]
+i <- ids[21]
 filter(d_obs_screen, person_id == i); d_process[i,]; d_obs_censor[i,]
 plot(TAU_HP_inf[,i], type="l")
 plot(TAU_HP[,i], type="l")
@@ -96,11 +96,11 @@ rate_accept <- numeric(length(ids))
 for(i in 1:length(ids)){ # acceptance rate
   rate_accept[i] <- mean(TAU_HP[2:m-1,ids[i]] != TAU_HP[2:m,ids[i]])
 }
-boxplot(rate_accept); summary(rate_accept)
-which.min(rate_accept); which.max(rate_accept)
+boxplot(rate_accept); summary(rate_accept); which.min(rate_accept); which.max(rate_accept)
+plot(d_obs_censor$censor_time[ids], rate_accept)
 
 ids <- which(d_obs_censor$censor_type=="screen")
-i <- ids[19]
+i <- ids[1]
 filter(d_obs_screen, person_id == i); d_process[i,]; d_obs_censor[i,]
 plot(TAU_HP_inf[,i], type="l")
 plot(TAU_HP[,i], type="l")
@@ -111,8 +111,8 @@ rate_accept <- numeric(length(ids))
 for(i in 1:length(ids)){ # acceptance rate
   rate_accept[i] <- mean(TAU_HP[2:m-1,ids[i]] != TAU_HP[2:m,ids[i]])
 }
-boxplot(rate_accept~d_obs_censor$censor_time[ids]); summary(rate_accept)
-which.min(rate_accept); which.max(rate_accept)
+boxplot(rate_accept); summary(rate_accept); which.min(rate_accept); which.max(rate_accept)
+boxplot(rate_accept ~ d_obs_censor$censor_time[ids])
 
 ids <- which(d_obs_censor$censor_type=="censored")
 i <- ids[1]
