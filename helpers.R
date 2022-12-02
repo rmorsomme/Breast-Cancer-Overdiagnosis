@@ -17,6 +17,10 @@ pweibull_ab <- function(a, b, shape, scale, log = F){
   pweibull(a, shape, scale, log.p = log, lower.tail = T)
 }
 
+rweibul_trunc <- function(a, b, shape, scale){
+  u <- runif(1, pweibull(a, shape, scale), pweibull(b, shape, scale))
+  qweibull(u, shape, scale)
+}
 
 #
 # Process ####
