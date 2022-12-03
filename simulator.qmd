@@ -26,7 +26,7 @@ theta <- list(
 theta <- update_scales(theta)
 
 prior <- list(
-  rate_H = 1, shape_H = 1, # gamma(shape_H, rate_H) prior on Weibull rate for H
+  rate_H = 1000, shape_H = 1, # gamma(shape_H, rate_H) prior on Weibull rate for H
   rate_P = 1000, shape_P = 1, # gamma(shape_P, rate_P) prior on Weibull rate for P
   a_psy  = 1, b_psy   = 1, # beta(a_psy, b_psy) prior on beta
   a_beta = 8, b_beta  = 2  # beta(a_beta, b_beta) prior on psy

@@ -17,12 +17,12 @@ pweibull_ab <- function(a, b, shape, scale){
   pweibull(a, shape, scale, lower.tail = T)
 }
 
-rweibul_trunc <- function(a, b, shape, scale){
+rweibull_trunc <- function(a, b, shape, scale){
   u <- runif(1, pweibull(a, shape, scale), pweibull(b, shape, scale))
   qweibull(u, shape, scale)
 }
 
-dweibul_trunc <- function(x, a, b, shape, scale, log = T){
+dweibull_trunc <- function(x, a, b, shape, scale, log = T){
   if(log){
     dweibull(x, shape, scale, log = T) - log(pweibull_ab(a, b, shape, scale))
   }else{
@@ -31,7 +31,7 @@ dweibul_trunc <- function(x, a, b, shape, scale, log = T){
 }
 
 #
-# Process ####
+# Biological process ####
 
 draw_sojourn_H <- function(theta){
   rweibull(1, shape = theta$shape_H, scale = theta$scale_H)
@@ -176,7 +176,7 @@ dlog_likelihood_i <- function(tau_HP_i, indolent_i, d_obs_screen_i, censor_type_
 
 
 #
-# MH ####
+# M-H ####
 
 compute_endpoints <- function(screens_i, censor_type_i, censor_time_i){
   
@@ -271,7 +271,7 @@ rprop_tau_HP <- function(censor_type_i, censor_time_i, endpoints_i, prob, theta)
   # sample tau_HP in chosen interval
   if(censor_type_i == "screen"  ){
     
-    sojourn_H_new <- rweibul_trunc(
+    sojourn_H_new <- rweibull_trunc(
       endpoints_i[k_new] - 40, endpoints_i[k_new+1] - 40,
       theta$shape_H, theta$scale_H
       )
@@ -279,7 +279,7 @@ rprop_tau_HP <- function(censor_type_i, censor_time_i, endpoints_i, prob, theta)
     
   } else if(censor_type_i == "clinical"){
     
-    sojourn_P_new <- rweibul_trunc(
+    sojourn_P_new <- rweibull_trunc(
       censor_time_i - endpoints_i[k_new+1], censor_time_i - endpoints_i[k_new],
       theta$shape_P, theta$scale_P
       )
@@ -293,7 +293,7 @@ rprop_tau_HP <- function(censor_type_i, censor_time_i, endpoints_i, prob, theta)
       
     }else{ # tau_HP < time_censor
       
-      sojourn_H_new <- rweibul_trunc(
+      sojourn_H_new <- rweibull_trunc(
         endpoints_i[k_new] - 40, endpoints_i[k_new+1] - 40,
         theta$shape_H, theta$scale_H
       )
@@ -319,7 +319,7 @@ dlog_prop_tau_HP <- function(tau_HP, censor_type_i, censor_time_i, endpoints_i, 
   dlog_tau <- if(censor_type_i == "screen"  ){
     
     sojourn_H <- tau_HP - 40
-    dweibul_trunc(
+    dweibull_trunc(
       sojourn_H, endpoints_i[k_new] - 40, endpoints_i[k_new+1] - 40,
       theta$shape_H, theta$scale_H, log = T
       )
@@ -327,7 +327,7 @@ dlog_prop_tau_HP <- function(tau_HP, censor_type_i, censor_time_i, endpoints_i, 
   } else if(censor_type_i == "clinical"){
     
     sojourn_P <- censor_time_i - tau_HP
-    dweibul_trunc(
+    dweibull_trunc(
       sojourn_P, censor_time_i - endpoints_i[k_new+1], censor_time_i - endpoints_i[k_new],
       theta$shape_P, theta$scale_P, log = T
     )
@@ -341,7 +341,7 @@ dlog_prop_tau_HP <- function(tau_HP, censor_type_i, censor_time_i, endpoints_i, 
     }else{ # tau_HP < time_censor
       
       sojourn_H <- tau_HP - 40
-      dweibul_trunc(
+      dweibull_trunc(
         sojourn_H, endpoints_i[k_new] - 40, endpoints_i[k_new+1] - 40,
         theta$shape_H, theta$scale_H, log = T
       )
@@ -355,12 +355,6 @@ dlog_prop_tau_HP <- function(tau_HP, censor_type_i, censor_time_i, endpoints_i, 
 }
 
 MH_tau_PH <- function(d_obs_screen_i, censor_type_i, censor_time_i, endpoints_i, indolent_i, tau_HP_i, theta){
-  
-  # data for person i
-  #d_obs_screen_i <- d_obs_screen %>% filter(person_id == i)
-  #d_obs_censor_i <- d_obs_censor %>% filter(person_id == i)
-  #indolent_i     <- indolent[i] 
-  #tau_HP_i <- tau_HP[i]
   
   # propose new tau_HP
   tau_HP_cur <- tau_HP_i
@@ -386,46 +380,58 @@ MH_tau_PH <- function(d_obs_screen_i, censor_type_i, censor_time_i, endpoints_i,
 
 #
 # MCMC ####
-MCMC <- function(m=100){
+
+MCMC <- function(
+    d_process, d_obs_screen, d_obs_censor,
+    theta_0,
+    m = 100
+    ){
   
   {
   n_obs <- nrow(d_process) 
   
   RATE_H <- RATE_P <- BETA <- PSY <- numeric(m)
   TAU_HP <- matrix(nrow = m, ncol = n_obs)
-  indolent <- d_process$indolent
-  tau_HP_tmp <- tau_HP   <- if_else(d_process$tau_HP < d_obs_censor$censor_time, d_process$tau_HP, Inf)
-  indolent               <- d_process$indolent #if_else(d_process$tau_HP < d_obs_censor$censor_time, d_process$indolent, NA_real_)
-  theta_tmp <- theta
-  
   
   # pre-process data
   n_screen_positive <- sum(d_obs_screen$screen_detected)
-  d_id <- d_process %>% select(person_id)
-  d_obs_screen_tbl <- d_obs_screen %>% nest(screens = screen_id:screen_detected)
-  screens          <- d_obs_screen_tbl$screens
-  censor_type      <- d_obs_censor$censor_type
-  censor_time      <- d_obs_censor$censor_time
-  endpoints        <- list(screens, censor_type, censor_time) %>% 
+  d_obs_screen_tbl  <- d_obs_screen %>% nest(screens = screen_id:screen_detected)
+  screens           <- d_obs_screen_tbl$screens
+  censor_type       <- d_obs_censor$censor_type
+  censor_time       <- d_obs_censor$censor_time
+  endpoints         <- list(screens, censor_type, censor_time) %>% 
     pmap(compute_endpoints)
+  
+  
+  # initialisation
+  indolent             <- d_process$indolent # truth
+  #if_else(d_process$tau_HP < d_obs_censor$censor_time, d_process$indolent, NA_real_)
+  
+  tau_HP_tmp <- tau_HP <- if_else(d_process$tau_HP < d_obs_censor$censor_time, d_process$tau_HP, Inf) # truth
+  #tau_HP <- rep(40+0.01, n_obs) # early onset times
+  
+  prob_0 <- list(censor_type, censor_time, endpoints) %>%
+    pmap(compute_prob, theta_0)
+  tau_HP <- list(censor_type, censor_time, endpoints, prob_0) %>%
+    pmap_dbl(rprop_tau_HP, theta_0)
   
   # MCMC
   tic()
   for(n in 1 : m){ print(n)
     
     # update parameters
-    rate_H    <- gibbs_rate_H(tau_HP, theta_tmp, prior, censor_time)
-    rate_P    <- gibbs_rate_P(tau_HP, indolent, theta_tmp, prior, censor_type, censor_time)
-    psy       <- gibbs_psy   (indolent , prior)
-    beta      <- gibbs_beta  (tau_HP, screens, prior, n_screen_positive)
-    theta_tmp <- list(rate_H=rate_H, rate_P=rate_P, psy=psy, beta=beta,
-                      shape_H=theta_tmp$shape_H, shape_P=theta_tmp$shape_P)
-    theta_tmp <- update_scales(theta_tmp)
+    rate_H <- gibbs_rate_H(tau_HP, theta, prior, censor_time)
+    rate_P <- gibbs_rate_P(tau_HP, indolent, theta, prior, censor_type, censor_time)
+    psy    <- gibbs_psy   (indolent , prior)
+    beta   <- gibbs_beta  (tau_HP, screens, prior, n_screen_positive)
+    theta  <- list(rate_H=rate_H, rate_P=rate_P, psy=psy, beta=beta,
+                   shape_H=theta_0$shape_H, shape_P=theta_0$shape_P)
+    theta  <- update_scales(theta)
     
     # update latent data
     #foreach(i=1:n_obs, .packages="tidyverse") %dopar% {
     tau_HP <- list(screens, censor_type, censor_time, endpoints, indolent, tau_HP) %>%
-      pmap_dbl(MH_tau_PH, theta_tmp)
+      pmap_dbl(MH_tau_PH, theta)
     
     # for(i in 1 : n_obs){ # this for-loop should be done in parallel
     #   set.seed(i)
@@ -442,10 +448,11 @@ MCMC <- function(m=100){
     
   }
   
-  runtime <- toc()
+  tictoc <- toc()
+  runtime <- tictoc$toc - tictoc$tic
   } # end runtime
   
-    # output
+  # output
   THETA <- list(
     RATE_H=RATE_H, RATE_P=RATE_P, BETA=BETA, PSY=PSY
     )
@@ -455,4 +462,3 @@ MCMC <- function(m=100){
   return(out)
   
 }
-

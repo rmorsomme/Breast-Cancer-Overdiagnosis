@@ -8,7 +8,7 @@ editor_options:
 
 ```{r}
 #setup parallel backend to use many processors
-#cl <- makeCluster(detectCores()-2) #not to overload your computer
+#cl <- makeCluster(detectCores()-2) #not to overload computer
 #registerDoParallel(cl)
   
 library(tidyverse)
@@ -23,11 +23,17 @@ library(tictoc)
 ```{r}
 set.seed(1)
 n <- nrow(d_process) # number of individuals
-m <- 1e3             # number of MCMC iterations
+m <- 2e2             # number of MCMC iterations
 
-#plan(multisession, workers = 7) # set the number of CPU cores to use when parallel processing
+factor_0 <- 1/10
+theta_0 <- list(
+  rate_H = theta$rate_H*factor_0, shape_H = theta$shape_H,
+  rate_P = theta$rate_P*factor_0, shape_P = theta$shape_P,
+  beta   = theta$beta  *factor_0, psy     = theta$psy*factor_0
+  )
+theta_0 <- update_scales(theta_0)
 
-out <- MCMC(m=m) 
+out <- MCMC(d_process, d_obs_screen, d_obs_censor, theta_0, m) 
 #profvis::profvis({out <- MCMC(m=m) }, interval =0.001)
 save(list="out", file=paste0("MCMC-n", n, "-m", m, ".RDATA"))
 ```
@@ -38,22 +44,22 @@ save(list="out", file=paste0("MCMC-n", n, "-m", m, ".RDATA"))
 load(paste0("MCMC-n", n, "-m", m, ".RDATA"))
 THETA <- out$THETA
 
-RATE_H <- THETA$RATE_H
-RATE_P <- THETA$RATE_P
-PSY    <- THETA$PSY
-BETA   <- THETA$BETA
+RATE_H <- THETA$RATE_H#[(m/2):m]
+RATE_P <- THETA$RATE_P#[(m/2):m]
+PSY    <- THETA$PSY   #[(m/2):m]
+BETA   <- THETA$BETA  #[(m/2):m]
 
-plot(RATE_H, type = "l")
-plot(RATE_P, type = "l")
-plot(PSY   , type = "l")
-plot(BETA  , type = "l")
+plot(RATE_H, type = "l"); abline(h=theta$rate_H, col = "red")
+plot(RATE_P, type = "l"); abline(h=theta$rate_P, col = "red")
+plot(PSY   , type = "l"); abline(h=theta$psy  , col = "red")
+plot(BETA  , type = "l"); abline(h=theta$beta   , col = "red")
 
 # Output
 x <- seq(1e-5, max(RATE_H, RATE_P, BETA, PSY), 0.0001)
-hist(RATE_H, freq=F, breaks=20); abline(v=theta$rate_H, col = "red"); lines(x, dgamma(x, prior$shape_H, prior$rate_H))
-hist(RATE_P, freq=F, breaks=20); abline(v=theta$rate_P, col = "red"); lines(x, dgamma(x, prior$shape_P, prior$rate_P))
-hist(PSY   , freq=F, breaks=20); abline(v=theta$psy   , col = "red"); lines(x, dbeta(x, prior$a_psy, prior$b_psy))
-hist(BETA  , freq=F, breaks=20); abline(v=theta$beta  , col = "red"); lines(x, dbeta(x, prior$a_beta, prior$b_beta))
+hist(RATE_H, freq=F, breaks=20); abline(v=theta$rate_H, col = "red"); abline(v=quantile(RATE_H, c(0.025, 0.975)), col = "grey"); lines(x, dgamma(x, prior$shape_H, prior$rate_H))
+hist(RATE_P, freq=F, breaks=20); abline(v=theta$rate_P, col = "red"); abline(v=quantile(RATE_P, c(0.025, 0.975)), col = "grey");lines(x, dgamma(x, prior$shape_P, prior$rate_P))
+hist(PSY   , freq=F, breaks=20); abline(v=theta$psy   , col = "red"); abline(v=quantile(PSY, c(0.025, 0.975)), col = "grey");lines(x, dbeta(x, prior$a_psy, prior$b_psy))
+hist(BETA  , freq=F, breaks=20); abline(v=theta$beta  , col = "red"); abline(v=quantile(BETA, c(0.025, 0.975)), col = "grey");lines(x, dbeta(x, prior$a_beta, prior$b_beta))
 
 acf(RATE_H)
 acf(RATE_P)
@@ -66,11 +72,10 @@ coda::effectiveSize(PSY)
 coda::effectiveSize(BETA)
 
 runtime <- out$runtime
-run_time <- runtime$toc - runtime$tic
-coda::effectiveSize(RATE_H)/run_time
-coda::effectiveSize(RATE_P)/run_time
-coda::effectiveSize(PSY)/run_time
-coda::effectiveSize(BETA)/run_time
+coda::effectiveSize(RATE_H)/runtime
+coda::effectiveSize(RATE_P)/runtime
+coda::effectiveSize(PSY)   /runtime
+coda::effectiveSize(BETA)  /runtime
 
 
 THETA <- tibble(log(RATE_H), log(RATE_P), BETA, PSY)
