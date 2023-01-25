@@ -10,34 +10,32 @@ rm(list = ls())
 
 source("helpers.R")
 
-#setup parallel backend to use many processors
-#cl <- makeCluster(detectCores()-2) #not to overload your computer
-#registerDoParallel(cl)
-  
 library(tidyverse)
 ```
 
 ```{r}
+set.seed(0)
+
 theta <- list(
   rate_H = 0.0005, shape_H = 2,
   rate_P = 0.0015, shape_P = 4,
-  beta   = 0.814 , psy     = 0.045
+  beta   = 0.814 , psi     = 0.75 # psi = 0.045
 )
 theta <- update_scales(theta)
 
 prior <- list(
-  rate_H = 1000, shape_H = 1, # gamma(shape_H, rate_H) prior on Weibull rate for H
-  rate_P = 1000, shape_P = 1, # gamma(shape_P, rate_P) prior on Weibull rate for P
-  a_psy  = 1, b_psy   = 1, # beta(a_psy, b_psy) prior on beta
-  a_beta = 8, b_beta  = 2  # beta(a_beta, b_beta) prior on psy
+  rate_H = 1, shape_H = 1, # gamma(shape_H, rate_H) prior on Weibull rate for H
+  rate_P = 2e3, shape_P = 2, # gamma(shape_P, rate_P) prior on Weibull rate for P
+  a_psi  = 1, b_psi   = 1, # beta(a_psi, b_psi)     prior on psi
+  a_beta = 8, b_beta  = 2  # beta(a_beta, b_beta)   prior on beta
 )
 
 age_start <- 40
 
-ages_screen <- seq(age_start, 150, by = 3)
+ages_screen <- seq(age_start, 150, by = 3) # seq(age_start + rpois(), 150, by = 3)
 n_screen <- length(ages_screen)
 
-n <- 1e3
+n <- 5e2
 d_process <- tibble(
   person_id = numeric(n), age_start = numeric(n), 
   sojourn_H = numeric(n), tau_HP    = numeric(n),
@@ -58,12 +56,10 @@ d_obs_censor <- tibble(
 ```{r}
 for(i in 1 : n){ # person i
   
-  set.seed(i)
-  
   # Process
   sojourn_H <- draw_sojourn_H(theta)
   tau_HP    <- age_start + sojourn_H
-  indolent  <- rbernoulli(1, theta$psy)
+  indolent  <- rbernoulli(1, theta$psi)
   sojourn_P <- if(!indolent) { draw_sojourn_P(theta) } else { Inf }
   tau_PC    <- tau_HP    + sojourn_P
   

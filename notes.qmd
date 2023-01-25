@@ -1,0 +1,184 @@
+---
+title: "Initial Exploration"
+format:
+  html:
+    self-contained: true
+    echo: false
+    number-sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup}
+#| include: false
+library(tidyverse)
+```
+
+```{r read_data}
+load("Data/Simulated_cohort_07071219.RData")
+d <- as_tibble(dat.sim)
+```
+
+Here is a snapshot of the simulated data
+
+```{r}
+head(d)
+```
+
+# EDA
+
+The sample can be divided into three groups based on their observed status at the censoring time:
+
+1.  no sign of cancer (46,502 women),
+2.  pre-clinical cancer is screen-detected (2,820 women),
+3.  cancer has reached the clinical stage (678 women)
+
+```{r}
+count(dat.sim, case, screen)
+d0  <- filter(dat.sim, case == 0) # group 1 (no sign of cancer) 
+d11 <- filter(dat.sim, case == 1, screen == 1) # group 2 (pre-clinical cancer)
+d10 <- filter(dat.sim, case == 1, screen == 0) # group 3 (clinical cancer)
+```
+
+```{r, eval = FALSE}
+d0_single <- filter(d0, ni == 1)
+par( mfrow= c(1,3) )
+hist(d0_single$eventime, main = "death time")
+hist(d0_single$screen_no.1, main = "screen time")
+hist(d0_single$eventime - d0_single$screen_no.1, main = "death time - screen time")
+par( mfrow= c(1,1) )
+```
+
+# Notation
+
+For person $i$, let $\mathbf{t}_i = (t^1_i, \dots, t^{n_i}_i)$ denote the $n_i$ screen times of person $i$ and $\mathbf{r}_i = (r^1_i, \dots, r^{n_i}_i)$ denote the results of these screens. Note that $r^j_i = 0$ for $j < n_i$ and $r^j_i \in \{0,1\}$ for $j = n_i$. For the patients with a clinical cancer, let $s_i$ denote the onset time of symptoms; note that $s_i$ indicate when the cancer of person $i$ evolved from the pre-clinical stage to the clinical stage.
+
+We can define the censoring time $c_i$ as a function of $\mathbf{t}_i$ and $\mathbf{r}_i$.
+
+$$
+c_i = \begin{cases}
+max\{t^j_i\} + 2, \qquad O_i = H \\
+t^j_i \text{ such that }r^j_i=1, \qquad O_i = P\\
+\tau_i^{pc}, \qquad O_i = C
+\end{cases}
+$$
+
+respectively denote the time and outcome of the $j$-th screening, $\tau^{hp}_i$ and $\tau^{pc}_i$ the transition times from healthy to pre-clinical cancer and from pre-clinical to clinical cancer, $O_i \in \{H, P, C\}$ (healthy, pre-clinical cancer, clinical cancer) the *observed* status of person $i$ at time $c_i$ (these correspond to the three observed groups of women), and finally $g_i \in \{0,1\}$ indicates whether the pre-clinical cancer is progressive.
+
+The observed data $X$ consist of $X = \{(T^j_i, p^j_i)_{j}, c_i, O_i\}_i$. The latent data $Z$ consist of $\{(\tau^{hp}_i, \tau^{pc}_i), g_i\}_i$.
+
+# Mapping observed status to latent history
+
+The first group ($O_i = H$) contains three types of women: (i) healthy at the censoring time ($c_i < \tau^{hp}_i$), (ii) undetected non-progressive pre-clinical cancer by censoring time ($\tau^{hp}_i < c_i$ and $g_i = 0$), and (iii) undetected progressive pre-clinical cancer and no clinical cancer by censoring time ($\tau^{hp}_i < c_i < \tau^{pc}_i$ and $g_i = 1$).
+
+The second group ($O_i = P$) contains two type of women: (i) detected non-progressive pre-clinical cancer by censoring time ($\tau^{hp}_i < c_i$ and $g_i = 0$), and (ii) detected progressive pre-clinical cancer and no clinical cancer by censoring time ($\tau^{hp}_i < c_i < \tau^{pc}_i$ and $g_i = 1$).
+
+The third group ($O_i = C$) contains one type of women: undetected progressive pre-clinical cancer and clinical cancer by censoring time ($\tau^{hp}_i < \tau^{pc}_i = c_i$ and $g_i = 1$)
+
+The latent data $Y$ will need to be compatible with the observed data $X$; in particular, $\{(\tau^{hp}_i, \tau^{pc}_i, g_i)\}_i$ will need to be compatible with the observed statuses $\{c_i, O_i\}_i$
+
+# Likelihood
+
+If the complete data $Y = (X, Z)$ are observed, we have the following complete-data likelihood
+
+$$
+L(\theta; X, Z) \propto \pi(X,Z | \theta) = \pi(X|Z, \theta) \pi(Z|\theta)
+$$
+
+To obtain the observed likelihood $L(\theta; X)$, we integrate out the latent data $Z$ from the complete-data likelihood
+
+$$
+L(\theta; X) = \int L(\theta; X, Z) dZ = \int \pi(X|Z, \theta) \pi(Z|\theta) dZ
+$$
+
+## Observation model
+
+The density of the observation process
+
+```{=tex}
+\begin{align*}
+\pi(X|Z, \theta) 
+& = \prod_i 1\{Z_i \text{ compatible with } X_i\} \prod_{j:\tau_i^{hp} < T_i^j} Pr(P^j_i = p^j_i) \\
+& = \beta^{\sum_i m_i}(1-\beta)^{\sum_i n_i-m_i} \prod_i 1\{Z_i \text{ compatible with } X_i\}
+\end{align*}
+```
+where
+
+-   the indicator function $$
+    1\{Z_i \text{ compatible with } X_i\} = \begin{cases}
+    1, \quad O_i = H, c_i < \tau^{hp}_i \\
+    1, \quad O_i = H, \tau^{hp}_i < c_i, g_i = 0 \\
+    1, \quad O_i = H, \tau^{hp}_i < c_i < \tau^{pc}_i, g_i = 1 \\
+    1, \quad O_i = P, \tau_i^{hp} < c_i, g_i = 0 \\
+    1, \quad O_i = P, \tau_i^{hp} < c_i < \tau_i^{pc}, g_i = 1 \\
+    1, \quad O_i = C, \tau_i^{hp} < \tau_i^{pc} = c_i, g_i = 1 \\
+    0, \quad \text{otherwise}
+    \end{cases}
+    $$ reflects the mapping from the previous section,
+
+-   $\{P^j_i \sim Bernoulli(\beta) \text{ iid}\}$ are RVs denoting the outcome of the screenings,
+
+-   $n_i$ is the total number of screens when the woman had (pre-clinical) cancer $(\tau^{hp}_i < T^j_i)$; note that for woman that were never screened when they had cancer (only when they had no cancer), $n_i = 0$;
+
+-   $m_i\in\{0,1\}$ is the number of positive screens when the woman had (pre-clinical) cancer. Of course, $m_i \le n_i$.
+
+## Underlying process
+
+The underlying stochastic process $\pi(Z|\theta)$ reflects the biological evolution of cancer (see Figure 1, E in article)
+
+```{=tex}
+\begin{align*}
+\pi(Z|\theta) = 
+& \prod_{i:c_i < \tau^{hp}_i } (1-F_h(c_i - s_0|\theta)), \quad \text{[healthy by censoring time]}\\
+& \prod_{j: \tau^{hp}_i < c_i, g_j = 0} f_h(\tau^{hp}_j - s_0|\theta) Pr(G_j = 0), \quad \text{[non-progressive pre-clinical by censoring time]}\\
+& \prod_{k: \tau^{hp}_i < c_i < \tau^{pc}_l, g_j = 1} f_h(\tau^{hp}_k - s_0|\theta) Pr(G_k = 1) (1-F_p(c_k - \tau^{hp}_k|\theta)), \quad \text{[progressive pre-clinical but not clinical by censoring time]}\\
+& \prod_{l: \tau^{hp}_i < \tau^{pc}_l  = c_i, g_j = 1} f_h(\tau^{hp}_l - s_0|\theta) Pr(G_l = 1) f_p(\tau^{pc}_l - \tau^{hp}_l|\theta)), \quad \text{[clinincal by censoring time]}\\
+\end{align*}
+```
+where
+
+-   $c_i$ is the censoring time of person $i$;
+-   $s_0$ is the age at which women start to be susceptible to breast cancer;
+-   $f_h$ and $F_h$ are respectively the density and CDF of the distribution of the sojourn time in the healthy compartment;
+-   $f_p$ and $F_p$ are respectively the density and CDF of the sojourn time in the progressive compartment; and
+-   $\{G_i \sim Bernoulli(\psi) \text{ iid}\}$ are RVs indicating whether a pre-clinical cancer is progressive,
+
+Note that the distributions $F_h$ and $F_p$ need not be exponential (non-Markovian process).
+
+# MCMC
+
+## Overview
+
+Alternate between M-H updates $Z|X, \theta$ (difficult) and M-H (Gibbs?) updates for $\theta|Z, X$ (easy).
+
+## Centered parameterization
+
+Since the observed data is wealky informative, I favor a centered parameterization (moving the parameters $\theta$ also moves the latent data $Z$). If we were to opt for a non-centered parameterization (move $\theta$ and then move $Z$), I am afraid that the MCMC will be very sticky: given $\theta$, $Z$ is constrained to a small region of the latent space, and similarly given $Z$, $\theta$ is also constrained to a small region of the parameter space.
+
+In the centered parameterization if some variable of interest $Z_i \sim Exp(\lambda)$ then we can let $Z_i = -\log U_i/\lambda$ where $U_i \sim U(0,1)$. The latent data then consist of $U = \{U_i\}_i$ and we simply alternate between updates of $U$ and updates of $\lambda$. Note that when $\lambda$ changes, then $Z^{hp}$ also changes.
+
+In our case, we need two latent variables $(U^{hp}_i, U^{pc}_i)$ for individual $i$, where the waiting time $Z^{hp}_i$ is a function of $(U^{hp}_i, \theta)$ and the waiting time $Z^{pc}_i - Z^{hp}_i$ is a function of $(U^{pc}_i, \theta)$.
+
+A natural transformation is the inverse-CDF transformation, where $Z^{hp}_i = F_{Z^{hp}}^{-1}(U^{hp}_i| \theta)$ and $Z^{pc}_i = F_{Z^{pc}}^{-1}(U^{pc}_i| \theta)$
+
+## Interweaving
+
+If the centered parameterization gives MCMC that mixes too slowly, we will implement the interweaving strategy of ([Yu and Meng, 2011](https://www.tandfonline.com/doi/pdf/10.1198/jcgs.2011.203main?casa_token=Cm8Thz2CltIAAAAA:ccVzRmst3vA8gdQDuZ-hkbqUcMrsbbafEunvlRxCSquGfgSOyLBK0X4IIbnyvCxatgdz1bWChHQ)), which boosts the efficiency of the MCMC by combining the centered and non-centered parameterizations.
+
+# Questions
+
+## Distribution of $P^j_i$
+
+$$
+P^j_i | T^j_i, Z
+\sim \begin{cases} 
+Dirac(0), \quad T^j_i < \tau^{hp}_i \\
+Bernoulli(\beta), \quad \tau^{hp}_i < T^j_i < \tau^{pc}_i \\
+\end{cases}.
+$$
+
+## dependence of the latent data $Z$ on teh censoring times $\{c_i\}$
+
+I do not see a way to write $\pi(Z|\theta)$ without using $c_i$. But I do not think that this is a fundamental issue since $c_i$ is not random variable, except for the "clinical" group for which $\tau^{pc}_i = c_i$. Still, I would be preferable to find a clean way to write $\pi(Z|\theta)$ without using any element of the observed data $X$.
+
+Idea: $c_i$ is some background information on which we always condition, similarly to the sample size $n = 50000$ or the end of the observation window $t^{end}$ in an epidemic model.

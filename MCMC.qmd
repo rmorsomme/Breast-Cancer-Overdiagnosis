@@ -16,6 +16,7 @@ library(tictoc)
 #library(furrr)
 #library(foreach)
 #library(doParallel)
+
 ```
 
 ## MCMC
@@ -23,62 +24,90 @@ library(tictoc)
 ```{r}
 set.seed(1)
 n <- nrow(d_process) # number of individuals
-m <- 2e2             # number of MCMC iterations
+m <- 1e3             # number of MCMC iterations
 
-factor_0 <- 1/10
-theta_0 <- list(
+factor_0 <- 1
+theta_0  <- list(
   rate_H = theta$rate_H*factor_0, shape_H = theta$shape_H,
   rate_P = theta$rate_P*factor_0, shape_P = theta$shape_P,
-  beta   = theta$beta  *factor_0, psy     = theta$psy*factor_0
+  beta   = min(1-0.01, theta$beta*factor_0), psi = min(1-0.01, theta$psi*factor_0)
   )
-theta_0 <- update_scales(theta_0)
+theta_0  <- update_scales(theta_0)
 
-out <- MCMC(d_process, d_obs_screen, d_obs_censor, theta_0, m) 
+out <- MCMC(d_process, d_obs_screen, d_obs_censor, theta_0, prior, m) 
 #profvis::profvis({out <- MCMC(m=m) }, interval =0.001)
-save(list="out", file=paste0("MCMC-n", n, "-m", m, ".RDATA"))
+
+path_output <- "output"
+path_mcmc <- paste0(path_output, "/MCMC")
+save(list="out", file=paste0(path_mcmc, "/MCMC-n=", n, "-m=", m, "-factor0=", factor_0, ".RDATA"))
 ```
 
 ## Output -- theta
 
 ```{r}
-load(paste0("MCMC-n", n, "-m", m, ".RDATA"))
-THETA <- out$THETA
+load(paste0(path_mcmc, "/MCMC-n=", n, "-m=", m, "-factor0=", factor_0, ".RDATA"))
 
-RATE_H <- THETA$RATE_H#[(m/2):m]
-RATE_P <- THETA$RATE_P#[(m/2):m]
-PSY    <- THETA$PSY   #[(m/2):m]
-BETA   <- THETA$BETA  #[(m/2):m]
+{
+  THETA <- out$THETA
+  
+  RATE_H <- THETA$RATE_H#[(m/2):m]
+  RATE_P <- THETA$RATE_P#[(m/2):m]
+  PSI    <- THETA$PSI   #[(m/2):m]
+  BETA   <- THETA$BETA  #[(m/2):m]
+}
 
 plot(RATE_H, type = "l"); abline(h=theta$rate_H, col = "red")
 plot(RATE_P, type = "l"); abline(h=theta$rate_P, col = "red")
-plot(PSY   , type = "l"); abline(h=theta$psy  , col = "red")
-plot(BETA  , type = "l"); abline(h=theta$beta   , col = "red")
+plot(PSI   , type = "l"); abline(h=theta$psi   , col = "red")
+plot(BETA  , type = "l"); abline(h=theta$beta  , col = "red")
 
 # Output
-x <- seq(1e-5, max(RATE_H, RATE_P, BETA, PSY), 0.0001)
-hist(RATE_H, freq=F, breaks=20); abline(v=theta$rate_H, col = "red"); abline(v=quantile(RATE_H, c(0.025, 0.975)), col = "grey"); lines(x, dgamma(x, prior$shape_H, prior$rate_H))
-hist(RATE_P, freq=F, breaks=20); abline(v=theta$rate_P, col = "red"); abline(v=quantile(RATE_P, c(0.025, 0.975)), col = "grey");lines(x, dgamma(x, prior$shape_P, prior$rate_P))
-hist(PSY   , freq=F, breaks=20); abline(v=theta$psy   , col = "red"); abline(v=quantile(PSY, c(0.025, 0.975)), col = "grey");lines(x, dbeta(x, prior$a_psy, prior$b_psy))
-hist(BETA  , freq=F, breaks=20); abline(v=theta$beta  , col = "red"); abline(v=quantile(BETA, c(0.025, 0.975)), col = "grey");lines(x, dbeta(x, prior$a_beta, prior$b_beta))
+x <- seq(1e-5, max(RATE_H, RATE_P, BETA, PSI), 0.0001)
+
+{
+  hist(RATE_H, freq=F, breaks=20)
+  abline(v=theta$rate_H, col = "red")
+  abline(v=quantile(RATE_H, c(0.025, 0.975)), col = "grey")
+  lines(x, dgamma(x, prior$shape_H, prior$rate_H))
+}
+
+{
+  hist(RATE_P, freq=F, breaks=20)
+  abline(v=theta$rate_P, col = "red")
+  abline(v=quantile(RATE_P, c(0.025, 0.975)), col = "grey")
+  lines(x, dgamma(x, prior$shape_P, prior$rate_P))
+}
+{
+  hist(PSI   , freq=F, breaks=20)
+  abline(v=theta$psi   , col = "red")
+  abline(v=quantile(PSI, c(0.025, 0.975)), col = "grey")
+  lines(x, dbeta(x, prior$a_psi, prior$b_psi))
+}
+{
+  hist(BETA  , freq=F, breaks=20)
+  abline(v=theta$beta  , col = "red")
+  abline(v=quantile(BETA, c(0.025, 0.975)), col = "grey")
+  lines(x, dbeta(x, prior$a_beta, prior$b_beta))
+}
 
 acf(RATE_H)
 acf(RATE_P)
-acf(PSY)
+acf(PSI)
 acf(BETA)
 
 coda::effectiveSize(RATE_H)
 coda::effectiveSize(RATE_P)
-coda::effectiveSize(PSY)
+coda::effectiveSize(PSI)
 coda::effectiveSize(BETA)
 
 runtime <- out$runtime
 coda::effectiveSize(RATE_H)/runtime
 coda::effectiveSize(RATE_P)/runtime
-coda::effectiveSize(PSY)   /runtime
+coda::effectiveSize(PSI)   /runtime
 coda::effectiveSize(BETA)  /runtime
 
 
-THETA <- tibble(log(RATE_H), log(RATE_P), BETA, PSY)
+THETA <- tibble(log(RATE_H), log(RATE_P), BETA, PSI)
 round(cor(THETA), 2)
 plot(THETA)
 ```
@@ -86,53 +115,73 @@ plot(THETA)
 ## Output -- latent data
 
 ```{r}
-TAU_HP     <- out$TAU_HP
-TAU_HP_inf <- is.infinite(TAU_HP) 
-
-# clinical
-ids <- which(d_obs_censor$censor_type=="clinical")
-i <- ids[21]
-filter(d_obs_screen, person_id == i); d_process[i,]; d_obs_censor[i,]
-plot(TAU_HP_inf[,i], type="l")
-plot(TAU_HP[,i], type="l")
-hist(TAU_HP[,i], breaks = 200, xlim=c(max(40, max(TAU_HP[,i]) - 15), max(TAU_HP[,i]))) # propose from truncated Weibull/triangular distribution instead of uniform?
-acf(TAU_HP[,i])
-
-rate_accept <- numeric(length(ids)) 
-for(i in 1:length(ids)){ # acceptance rate
-  rate_accept[i] <- mean(TAU_HP[2:m-1,ids[i]] != TAU_HP[2:m,ids[i]])
+{
+  TAU_HP       <- out$TAU_HP
+  TAU_HP_inf   <- is.infinite(TAU_HP)
+  ACCEPTED     <- out$ACCEPTED
+  accept_rate  <- colMeans(ACCEPTED)
+  tau_inf_rate <- colMeans(TAU_HP_inf)
 }
-boxplot(rate_accept); summary(rate_accept); which.min(rate_accept); which.max(rate_accept)
-plot(d_obs_censor$censor_time[ids], rate_accept)
 
-# screen
-ids <- which(d_obs_censor$censor_type=="screen")
-i <- ids[1]
-filter(d_obs_screen, person_id == i); d_process[i,]; d_obs_censor[i,]
-plot(TAU_HP_inf[,i], type="l")
-plot(TAU_HP[,i], type="l")
-hist(TAU_HP[,i], breaks=50)
-acf(TAU_HP[,i])
+#
+# group
 
-rate_accept <- numeric(length(ids)) 
-for(i in 1:length(ids)){ # acceptance rate
-  rate_accept[i] <- mean(TAU_HP[2:m-1,ids[i]] != TAU_HP[2:m,ids[i]])
+group_id <- "clinical"
+
+{
+  ids <- which(d_obs_censor$censor_type==group_id)
+  accept_rate_group  <- accept_rate [ids]
+  tau_inf_rate_group <- tau_inf_rate[ids]
+  
+  summary(accept_rate_group) %>% print
+  order(accept_rate_group) %>% print
 }
-boxplot(rate_accept); summary(rate_accept); which.min(rate_accept); which.max(rate_accept)
-boxplot(rate_accept ~ d_obs_censor$censor_time[ids])
 
-# censored
-ids <- which(d_obs_censor$censor_type=="censored")
-i <- ids[1]
-d_process[i,]; filter(d_obs_screen, person_id == i); d_obs_censor[i,]
-plot(TAU_HP_inf[,i], type="l")
-acf(as.numeric(TAU_HP_inf[,i]))
-plot(TAU_HP[!TAU_HP_inf[,i],i], type="l")
+if(group_id == "censored"){
+  boxplot(tau_inf_rate_group)
+  summary(tau_inf_rate_group)%>% print
+  order(tau_inf_rate_group) %>% print
 
-prop_inf <- colMeans(TAU_HP_inf[,ids])
-boxplot(prop_inf) # is this plausible?
-summary(prop_inf)
-which.min(prop_inf); which.max(prop_inf)
-plot(d_obs_censor$censor_time[ids], prop_inf, xlab = "Censoring age (c)", ylab = "Probability of (c<tau)")
-plot(d_obs_censor$censor_time[ids], prop_inf, xlab = "Censoring age (c)", ylab = "Probability of (c<tau)", xlim=c(40,70))
+}
+
+if(group_id == "censored")  plot(d_obs_censor$censor_time[ids], prop_inf, xlab = "Censoring age (c)", ylab = "Probability of (c<tau)")
+if(group_id == "censored")  plot(d_obs_censor$censor_time[ids], prop_inf, xlab = "Censoring age (c)", ylab = "Probability of (c<tau)", xlim=c(40,70))
+
+boxplot(accept_rate_group)
+if(group_id == "screen")  boxplot(accept_rate_group ~ d_obs_censor$censor_time[ids])
+plot(d_obs_censor$censor_time[ids], accept_rate_group)
+
+#
+# individual
+{
+  i_lowest_accept  <- order(accept_rate_group)[1]
+  i_highest_accept <- order(accept_rate_group)[length(accept_rate_group)]
+  i <- ids[i_lowest_accept]
+  filter(d_obs_screen, person_id == i) %>% print
+  d_process[i,] %>% print
+  d_obs_censor[i,] %>% print
+  
+  mcmc_tau     <- TAU_HP[,i]
+  mcmc_tau_inf <- TAU_HP_inf[,i]
+  tau_true <- d_process[i, "tau_HP"]
+}
+
+accept_rate[i]
+
+if(group_id == "censored")  plot(mcmc_tau_inf, type="l")
+
+plot(mcmc_tau[is.finite(mcmc_tau)], type="l"); abline(h=tau_true, col = "red")
+
+if(group_id == "censored"){
+  acf(as.numeric(mcmc_tau_inf))
+}else{
+  acf(mcmc_tau)
+}
+
+
+if(group_id != "censored"){
+  hist(mcmc_tau, breaks = 200, xlim=c(max(40, max(mcmc_tau) - 15), max(mcmc_tau)))
+  abline(v=tau_true, col = "red")
+  abline(v=quantile(mcmc_tau, c(0.025, 0.975)), col = "grey")
+}
 ```
