@@ -1,16 +1,28 @@
 
 rm(list = ls())
 
+#
+# Set up
 library(tidyverse)
 library(tictoc)
-
-# Simulate data
-n <- 2e3  # sample size
+source("helpers.R") # load helper functions
 set.seed(0)
+
+theta <- list(
+    rate_H = 0.0005, shape_H = 2,
+    rate_P = 0.0015, shape_P = 4,
+    beta   = 0.814 , psi     = 0.75 # psi = 0.045
+)
+theta <- update_scales(theta)
+
+#
+# Simulate data
+n <- 1e3  # sample size
 source("simulator.R")
 
+#
 # MCMC setup
-m <- 4e3 # number of MCMC iterations
+m <- 2e3 # number of MCMC iterations
 
 factor_0 <- 1
 theta_0  <- list(
@@ -27,6 +39,7 @@ prior <- list(
   a_beta = 8, b_beta  = 2  # beta(a_beta, b_beta)   prior on beta
 )
 
+# path to save mcmc draws
 path_output <- "output"
 path_mcmc   <- paste0(path_output, "/MCMC")
 file_id     <- paste0(path_mcmc, "/MCMC-n=", n, "-m=", m, "-factor0=", factor_0, ".RDATA")

@@ -3,7 +3,7 @@ source("mcmc_setup.R")
 load(file_id)
 
 #
-# theta ####
+# Parameters ####
 
 {
   THETA <- out$THETA
@@ -14,12 +14,15 @@ load(file_id)
   BETA   <- THETA$BETA  #[(m/2):m]
 }
 
+#
+## Traceplot ####
 plot(RATE_H, type = "l"); abline(h=theta$rate_H, col = "red")
 plot(RATE_P, type = "l"); abline(h=theta$rate_P, col = "red")
 plot(PSI   , type = "l"); abline(h=theta$psi   , col = "red")
 plot(BETA  , type = "l"); abline(h=theta$beta  , col = "red")
 
-# Output
+#
+## Histograms ####
 x <- seq(1e-5, max(RATE_H, RATE_P, BETA, PSI), 0.0001)
 
 {
@@ -48,11 +51,15 @@ x <- seq(1e-5, max(RATE_H, RATE_P, BETA, PSI), 0.0001)
   lines(x, dbeta(x, prior$a_beta, prior$b_beta))
 }
 
+#
+## ACF ####
 acf(RATE_H)
 acf(RATE_P)
 acf(PSI)
 acf(BETA)
 
+#
+## Effective sample size ####
 coda::effectiveSize(RATE_H)
 coda::effectiveSize(RATE_P)
 coda::effectiveSize(PSI)
@@ -64,14 +71,15 @@ coda::effectiveSize(RATE_P)/runtime
 coda::effectiveSize(PSI)   /runtime
 coda::effectiveSize(BETA)  /runtime
 
-
+#
+## Correlation
 THETA <- tibble(log(RATE_H), log(RATE_P), BETA, PSI)
 round(cor(THETA), 2)
 plot(THETA)
 
 
 #
-# latent data ####
+# Latent data ####
 {
   TAU_HP       <- out$TAU_HP
   TAU_HP_inf   <- is.infinite(TAU_HP)
