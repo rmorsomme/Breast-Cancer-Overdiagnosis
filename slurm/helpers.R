@@ -406,7 +406,8 @@ rprop_latent <- function(censor_type_i, censor_time_i, age_screen_i, endpoints_i
   # propose indolent
   indolent_new <- rprop_indolent(tau_HP_new, age_screen_i, censor_type_i, censor_time_i, theta)
   
-  latent_new <- c("tau_HP" = tau_HP_new, "indolent" = indolent_new)
+  #latent_new <- c("tau_HP" = tau_HP_new, "indolent" = indolent_new)
+  latent_new <- c(tau_HP_new, indolent_new)
   
   return(latent_new)
   
@@ -424,30 +425,32 @@ dlog_prop_latent <- function(tau_HP_i, indolent_i, censor_type_i, censor_time_i,
   
 }
 
-MH_latent <- function(latent_cur, age_screen_i, censor_type_i, censor_time_i, endpoints_i, theta){
+MH_latent <- function(tau_HP_cur, indolent_cur, age_screen_i, censor_type_i, censor_time_i, endpoints_i, theta){
   
   # pre-processing
   prob_tau <- compute_prob_tau(censor_type_i, censor_time_i, endpoints_i, theta)
   
   # propose new latent
   latent_new <- rprop_latent(censor_type_i, censor_time_i, age_screen_i, endpoints_i, prob_tau, theta)
+  tau_HP_new   <- latent_new[1]
+  indolent_new <- latent_new[2]
   #if(latent_new == latent_cur)  return(latent_cur)
   
-  if(is.infinite(latent_new[1]) & is.infinite(latent_cur[1])){
-      out <- c(latent_new, "accepted" = TRUE)
+  if(is.infinite(tau_HP_new) & is.infinite(tau_HP_cur)){
+      out <- c(tau_HP_new, indolent_new, TRUE)
   }else{
     # M-H acceptance ratio
-    dlog_prop_cur  <- dlog_prop_latent(latent_cur[1], latent_cur[2], censor_type_i, censor_time_i, endpoints_i, age_screen_i, prob_tau, theta)
-    dlog_prop_new  <- dlog_prop_latent(latent_new[1], latent_new[2], censor_type_i, censor_time_i, endpoints_i, age_screen_i, prob_tau, theta)
-    dlog_lik_cur   <- dlog_likelihood_i(latent_cur[1], latent_cur[2], age_screen_i, censor_type_i, censor_time_i, theta)
-    dlog_lik_new   <- dlog_likelihood_i(latent_new[1], latent_new[2], age_screen_i, censor_type_i, censor_time_i, theta)
+    dlog_prop_cur  <- dlog_prop_latent (tau_HP_cur, indolent_cur, censor_type_i, censor_time_i, endpoints_i, age_screen_i, prob_tau, theta)
+    dlog_prop_new  <- dlog_prop_latent (tau_HP_new, indolent_new, censor_type_i, censor_time_i, endpoints_i, age_screen_i, prob_tau, theta)
+    dlog_lik_cur   <- dlog_likelihood_i(tau_HP_cur, indolent_cur, age_screen_i , censor_type_i, censor_time_i, theta)
+    dlog_lik_new   <- dlog_likelihood_i(tau_HP_new, indolent_new, age_screen_i , censor_type_i, censor_time_i, theta)
     
     MH_logratio <- dlog_lik_new - dlog_lik_cur + dlog_prop_cur - dlog_prop_new
     
     out <- if(runif(1) < exp(MH_logratio)){ # accept new tau_HP
-      c(latent_new, "accepted" = TRUE)
+      c(tau_HP_new, indolent_new, TRUE)
     }else{
-      c(latent_cur, "accepted" = FALSE)
+      c(tau_HP_cur, indolent_cur, FALSE)
     }
     
   }
@@ -487,14 +490,16 @@ MH_tau_PH <- function(age_screen_i, censor_type_i, censor_time_i, endpoints_i, i
 MCMC <- function(
     d_process, d_obs_screen, d_obs_censor,
     theta_0, prior,
-    m = 100
+    m = 100,
+    thin = 10
     ){
   
   {
   n_obs <- nrow(d_process) 
   
-  RATE_H <- RATE_P <- BETA <- PSI <- numeric(m)
-  TAU_HP <- INDOLENT <- ACCEPTED <- matrix(nrow = m, ncol = n_obs)
+  m_thin <- m / thin
+  RATE_H <- RATE_P <- BETA <- PSI <- numeric(m_thin)
+  TAU_HP <- INDOLENT <- ACCEPTED <- matrix(nrow = m_thin, ncol = n_obs)
   
   # pre-process data
   n_screen_positive <- sum(d_obs_screen$screen_detected)
@@ -503,47 +508,57 @@ MCMC <- function(
   d_obs_screen_tbl  <- d_obs_screen %>% nest(screens = screen_id:screen_detected)
   screens           <- d_obs_screen_tbl$screens
   age_screen        <- screens %>% map(~ .[["age_screen"]])
-  endpoints         <- list(age_screen, censor_type, censor_time) %>% 
-    pmap(compute_endpoints)
+  #endpoints         <- list(age_screen, censor_type, censor_time) %>% pmap(compute_endpoints)
+  endpoints          <- mapply(
+    compute_endpoints,
+    age_screen, censor_type, censor_time
+    )
   
   # initialisation of latent variables
-  prob_tau_0 <- list(censor_type, censor_time, endpoints) %>%
-    pmap(compute_prob_tau, theta_0)
-  latent_data <- list(censor_type, censor_time, age_screen, endpoints, prob_tau_0) %>% 
-    pmap(rprop_latent, theta)
-  #indolent <- list(tau_HP, age_screen, censor_type, censor_time) %>%
-  #  pmap_dbl(gibbs_indolent, theta)
-  #tau_HP_tmp <- tau_HP <- if_else(d_process$tau_HP < d_obs_censor$censor_time, d_process$tau_HP, Inf) # truth
-  #indolent             <- d_process$indolent # truth
-  #if_else(d_process$tau_HP < d_obs_censor$censor_time, d_process$indolent, NA_real_) # truth
-  
+  #prob_tau_0 <- list(censor_type, censor_time, endpoints) %>% pmap(compute_prob_tau, theta_0)
+  prob_tau_0 <- mapply(
+    compute_prob_tau,
+    censor_type, censor_time, endpoints,
+    MoreArgs = list(theta = theta_0)
+  )
+  #latent_data <- list(censor_type, censor_time, age_screen, endpoints, prob_tau_0) %>% pmap(rprop_latent, theta)
+  latent_data <- mapply(
+    rprop_latent,
+    censor_type, censor_time, age_screen, endpoints, prob_tau_0,
+    MoreArgs = list(theta = theta),
+    USE.NAMES = FALSE
+  )
   
   # MCMC
   tic()
-  for(n in 1 : m){ print(n)
+  for(n in 1 : m){ #print(n)
     
     # update parameters
-    tau_HP   <- latent_data %>% map_dbl(~ .[["tau_HP"  ]])
-    indolent <- latent_data %>% map_dbl(~ .[["indolent"]])
+    #tau_HP   <- latent_data %>% map_dbl(~ .[["tau_HP"  ]])
+    #indolent <- latent_data %>% map_dbl(~ .[["indolent"]])
+    tau_HP   <- latent_data[1,]
+    indolent <- latent_data[2,]
     
     rate_H <- gibbs_rate_H(tau_HP, theta, prior, censor_time)
     rate_P <- gibbs_rate_P(tau_HP, indolent, theta, prior, censor_type, censor_time)
     psi    <- gibbs_psi   (indolent, prior)
     beta   <- gibbs_beta  (tau_HP, screens, prior, n_screen_positive)
-    theta  <- list(rate_H=rate_H, rate_P=rate_P, psi=psi, beta=beta,
-                   shape_H=theta_0$shape_H, shape_P=theta_0$shape_P)
+    theta  <- list(
+      rate_H  = rate_H         , rate_P  = rate_P         , psi = psi, beta = beta,
+      shape_H = theta_0$shape_H, shape_P = theta_0$shape_P
+      )
     theta  <- update_scales(theta)
     
     # update latent data
-    #foreach(i=1:n_obs, .packages="tidyverse") %dopar% {
-    latent_data <- list(latent_data, age_screen, censor_type, censor_time, endpoints) %>%
-      pmap(MH_latent, theta)
-    accepted <- latent_data %>% map_dbl(~ .[["accepted"]])
-    #tau_HP <- list(age_screen, censor_type, censor_time, endpoints, indolent, tau_HP) %>%
-    #  pmap_dbl(MH_tau_PH, theta)
-    #indolent <- list(tau_HP, age_screen, censor_type, censor_time) %>%
-    #  pmap_dbl(gibbs_indolent, theta)
+    #latent_data <- list(tau_HP, indolent, age_screen, censor_type, censor_time, endpoints) %>% pmap(MH_latent, theta)
+    #accepted <- latent_data %>% map_dbl(~ .[["accepted"]])
     
+    latent_data <- mapply(
+      MH_latent,
+      tau_HP, indolent, age_screen, censor_type, censor_time, endpoints,
+      MoreArgs = list(theta = theta)
+    )
+    accepted <- latent_data[3,]
     
     # for(i in 1 : n_obs){ # this for-loop should be done in parallel
     #   set.seed(i)
@@ -552,17 +567,24 @@ MCMC <- function(
     #   )
     # }
     
-    RATE_H  [n ] <- rate_H
-    RATE_P  [n ] <- rate_P
-    BETA    [n ] <- beta
-    PSI     [n ] <- psi
-    TAU_HP  [n,] <- tau_HP
-    INDOLENT[n,] <- indolent
-    ACCEPTED[n,] <- accepted
+    if(n %% thin == 0){
+      
+      n_thin <- n %/% thin
+      
+      RATE_H  [n_thin ] <- rate_H
+      RATE_P  [n_thin ] <- rate_P
+      BETA    [n_thin ] <- beta
+      PSI     [n_thin ] <- psi
+      TAU_HP  [n_thin,] <- tau_HP
+      INDOLENT[n_thin,] <- indolent
+      ACCEPTED[n_thin,] <- accepted
+      
+    }
+  
     
   }
   
-  tictoc <- toc()
+  tictoc  <- toc()
   runtime <- tictoc$toc - tictoc$tic
   } # end runtime
   
@@ -570,6 +592,7 @@ MCMC <- function(
   THETA <- list(
     RATE_H=RATE_H, RATE_P=RATE_P, BETA=BETA, PSI=PSI
     )
+  
   out <- list(
     THETA=THETA, TAU_HP=TAU_HP, INDOLENT=INDOLENT,
     ACCEPTED=ACCEPTED,

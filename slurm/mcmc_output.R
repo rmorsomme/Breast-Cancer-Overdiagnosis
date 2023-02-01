@@ -1,5 +1,13 @@
 
-source("mcmc_setup.R")
+rm(list = ls())
+
+n <- 1e4
+m <- 1e4
+factor_0 <- 1
+path_mcmc   <- "output/MCMC"
+file_id     <- paste0(path_mcmc, "/MCMC-n=", n, "-m=", m, "-factor0=", factor_0, ".RDATA")
+
+#setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis/slurm")
 load(file_id)
 
 #

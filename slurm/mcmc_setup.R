@@ -22,7 +22,7 @@ source("simulator.R")
 
 #
 # MCMC setup
-m <- 2e3 # number of MCMC iterations
+m <- 1e2 # number of MCMC iterations
 
 factor_0 <- 1
 theta_0  <- list(
@@ -40,6 +40,6 @@ prior <- list(
 )
 
 # path to save mcmc draws
-path_output <- "output"
-path_mcmc   <- paste0(path_output, "/MCMC")
+path_mcmc   <- "output/MCMC"
 file_id     <- paste0(path_mcmc, "/MCMC-n=", n, "-m=", m, "-factor0=", factor_0, ".RDATA")
+

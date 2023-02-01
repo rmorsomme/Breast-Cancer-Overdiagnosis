@@ -1,4 +1,4 @@
-
+tic()
 #
 # Simulate artificial data ####
 
@@ -45,7 +45,7 @@ for(i in 1 : n){ # person i
 #
 ## Observation process ####
 
-for(i in 1 : n){  print(i) # person i
+for(i in 1 : n){  # print(i) # person i
   
     tau_HP    <- d_process$tau_HP[i]
     tau_PC    <- d_process$tau_PC[i]
@@ -82,3 +82,4 @@ for(i in 1 : n){  print(i) # person i
     }
   
 }
+toc()
