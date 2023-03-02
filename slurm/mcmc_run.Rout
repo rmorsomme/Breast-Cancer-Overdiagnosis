@@ -17,8 +17,6 @@ Type 'demo()' for some demos, 'help()' for on-line help, or
 'help.start()' for an HTML browser interface to help.
 Type 'q()' to quit R.
 
-[Previously saved workspace restored]
-
 > 
 > source("mcmc_setup.R")
 ── Attaching packages ─────────────────────────────────────── tidyverse 1.3.1 ──
@@ -29,18 +27,24 @@ Type 'q()' to quit R.
 ── Conflicts ────────────────────────────────────────── tidyverse_conflicts() ──
 ✖ dplyr::filter() masks stats::filter()
 ✖ dplyr::lag()    masks stats::lag()
-228.607 sec elapsed
+18.478 sec elapsed
 > 
-> out <- MCMC(d_process, d_obs_screen, d_obs_censor, theta_0, prior, m)
-2449.676 sec elapsed
+> print(n_cpu)
+[1] 45
+> 
+> out <- MCMC(d_process, d_obs_screen, d_obs_cen6397.681 sec elapsed
 > 
 > save(
 +     out,
-+     n, m, file_id,
 +     prior, theta,
 +     file = file_id
-+     )
++     )eta,
+Error: unexpected symbol in:
+"    file = file_id
+    )eta"
+Execution halted
+
 > 
 > proc.time()
-    user   system  elapsed 
-2689.741    0.393 2705.672 
+   user  system elapsed 
+ 26.551  22.123  25.728 

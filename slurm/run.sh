@@ -8,4 +8,4 @@
 hostname # print hostname
 module load R
 Export R_LIBS_USER = ~/R/x86_64-pc-linux-gnu-library/4.1
-R CMD BATCH mcmc_run.R
+R CMD BATCH --no-save mcmc_run.R

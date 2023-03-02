@@ -2,12 +2,12 @@
 rm(list = ls())
 
 n <- 1e4
-m <- 1e4
+m <- 1e3
 factor_0 <- 1
 path_mcmc   <- "output/MCMC"
-file_id     <- paste0(path_mcmc, "/MCMC-n=", n, "-m=", m, "-factor0=", factor_0, ".RDATA")
+file_id     <- paste0(path_mcmc, "/MCMC-n=", n, "-m=", m, "-factor0=", factor_0, "-n_cpu=", n_cpu, ".RDATA")
 
-#setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis/slurm")
+setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis/slurm")
 load(file_id)
 
 #
@@ -39,7 +39,6 @@ x <- seq(1e-5, max(RATE_H, RATE_P, BETA, PSI), 0.0001)
   abline(v=quantile(RATE_H, c(0.025, 0.975)), col = "grey")
   lines(x, dgamma(x, prior$shape_H, prior$rate_H))
 }
-
 {
   hist(RATE_P, freq=F, breaks=20)
   abline(v=theta$rate_P, col = "red")
@@ -68,34 +67,39 @@ acf(BETA)
 
 #
 ## Effective sample size ####
-coda::effectiveSize(RATE_H)
-coda::effectiveSize(RATE_P)
-coda::effectiveSize(PSI)
-coda::effectiveSize(BETA)
+{
+coda::effectiveSize(RATE_H) %>% print()
+coda::effectiveSize(RATE_P) %>% print()
+coda::effectiveSize(PSI) %>% print()
+coda::effectiveSize(BETA) %>% print()
+}
 
+{
 runtime <- out$runtime
-coda::effectiveSize(RATE_H)/runtime
-coda::effectiveSize(RATE_P)/runtime
-coda::effectiveSize(PSI)   /runtime
-coda::effectiveSize(BETA)  /runtime
+(coda::effectiveSize(RATE_H)/runtime) %>% print()
+(coda::effectiveSize(RATE_P)/runtime) %>% print()
+(coda::effectiveSize(PSI)   /runtime) %>% print()
+(coda::effectiveSize(BETA)  /runtime) %>% print()
+}
 
 #
 ## Correlation
 THETA <- tibble(log(RATE_H), log(RATE_P), BETA, PSI)
 round(cor(THETA), 2)
-plot(THETA)
+#plot(THETA)
 
 
 #
 # Latent data ####
 {
-  TAU_HP       <- out$TAU_HP
-  TAU_HP_inf   <- is.infinite(TAU_HP)
-  ACCEPTED     <- out$ACCEPTED
-  accept_rate  <- colMeans(ACCEPTED)
-  tau_inf_rate <- colMeans(TAU_HP_inf)
+  TAU_HP        <- out$TAU_HP
+  TAU_HP_inf    <- is.infinite(TAU_HP)
+  ACCEPT_LATENT <- out$ACCEPT_LATENT
+  ACCEPT_PSI    <- out$ACCEPT_PSI
+  tau_inf_rate  <- colMeans(TAU_HP_inf)
+  
+  mean(ACCEPT_PSI)
 }
-
 #
 ## group ####
 

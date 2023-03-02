@@ -12,3 +12,4 @@ i <- which(d_obs_censor$censor_type == "clinical")[1]
 d_process    %>% filter(person_id == i)
 d_obs_censor %>% filter(person_id == i)
 d_obs_screen %>% filter(person_id == i)
+
