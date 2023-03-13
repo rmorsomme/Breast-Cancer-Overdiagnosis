@@ -144,12 +144,16 @@ dlog_sojourn_P <- function(tau_HP_i, theta, indolent_i, censor_type_i, censor_ti
 dlog_psi <- function(indolent_i, theta){
   if(is.na(indolent_i)){
     0
-  } else {
-    dbinom(
-      indolent_i, 1,
-      prob = theta$psi, log = TRUE
-    )
+  } else if(indolent_i) { # Bernoulli pmf
+    log(theta$psi)
+  } else if(!indolent_i){
+    log(1-theta$psi)
   }
+  
+    # dbinom(
+    #   indolent_i, 1,
+    #   prob = theta$psi, log = TRUE
+    # )
 }
 
 dlog_beta <- function(age_screen_i, theta, tau_HP_i, n_screen_positive_i){
@@ -301,7 +305,7 @@ compute_prob_tau <- function(censor_type, censor_time, endpoints, theta, n_cpu){
   )
 }
 
-rprop_tau_HP <- function(censor_type_i, censor_time_i, endpoints_i, prob_tau_i, theta){
+rprop_tau_HP_i <- function(censor_type_i, censor_time_i, endpoints_i, prob_tau_i, theta){
   
   K <- length(prob_tau_i) # number of intervals
   
@@ -345,6 +349,16 @@ rprop_tau_HP <- function(censor_type_i, censor_time_i, endpoints_i, prob_tau_i, 
   
   return(tau_HP_new)
 
+}
+
+rprop_tau_HP <- function(censor_type, censor_time, endpoints, prob_tau, theta, n_cpu){
+  mcmapply(
+    rprop_tau_HP_i,
+    censor_type, censor_time, endpoints, prob_tau,
+    MoreArgs = list(theta = theta),
+    USE.NAMES = FALSE,
+    mc.cores = n_cpu
+  )
 }
 
 dlog_prop_tau_HP_i <- function(tau_HP_i, censor_type_i, censor_time_i, endpoints_i, prob_tau_i, theta){
@@ -395,9 +409,9 @@ dlog_prop_tau_HP_i <- function(tau_HP_i, censor_type_i, censor_time_i, endpoints
 }
 
 #
-# M-H indolent ####
+# indolent ####
 
-compute_prob_indolent <- function(tau_HP_i, censor_type_i, censor_time_i, theta){
+compute_prob_indolent_i <- function(tau_HP_i, censor_type_i, censor_time_i, theta){
   
   L_0 <- dloglik_indolent_i(tau_HP_i, indolent_i = 0, censor_type_i, censor_time_i, theta) %>% exp()
   L_1 <- dloglik_indolent_i(tau_HP_i, indolent_i = 1, censor_type_i, censor_time_i, theta) %>% exp()
@@ -406,24 +420,9 @@ compute_prob_indolent <- function(tau_HP_i, censor_type_i, censor_time_i, theta)
   
 }
 
-rprop_indolent_i <- function(tau_HP_i, censor_type_i, censor_time_i, theta){
-  
-  indolent_i <- if(censor_type_i == "clinical"){
-    0
-  }else if(is.infinite(tau_HP_i)){
-    NA
-  }else{
-    p_i <- compute_prob_indolent(tau_HP_i, censor_type_i, censor_time_i, theta)
-    rbinom(1,1,p_i)
-  }
-  
-  return(indolent_i)
-  
-}
-
-rprop_indolent <- function(tau_HP, censor_type, censor_time, theta, n_cpu){
+compute_prob_indolent <- function(tau_HP, censor_type, censor_time, theta, n_cpu){
   mcmapply(
-    rprop_indolent_i,
+    compute_prob_indolent_i,
     tau_HP, censor_type, censor_time,
     MoreArgs = list(theta = theta),
     USE.NAMES = FALSE,
@@ -431,34 +430,63 @@ rprop_indolent <- function(tau_HP, censor_type, censor_time, theta, n_cpu){
   )
 }
 
+rprop_indolent_i <- function(tau_HP_i, censor_type_i, prob_indolent_i){
+  
+  indolent_i <- if(censor_type_i == "clinical"){
+    0
+  }else if(is.infinite(tau_HP_i)){
+    NA
+  }else{
+    #prob_indolent_i <- compute_prob_indolent(tau_HP_i, censor_type_i, censor_time_i, theta)
+    rbinom(1,1,prob_indolent_i)
+  }
+  
+  return(indolent_i)
+  
+}
 
-dlog_prop_indolent_i <- function(indolent_i, tau_HP_i, censor_type_i, censor_time_i, theta){
+rprop_indolent <- function(tau_HP, censor_type, prob_indolent, n_cpu){
+  mcmapply(
+    rprop_indolent_i,
+    tau_HP, censor_type, prob_indolent,
+    #MoreArgs = list(theta = theta),
+    USE.NAMES = FALSE,
+    mc.cores = n_cpu
+  )
+}
+
+
+dlog_prop_indolent_i <- function(indolent_i, tau_HP_i, censor_type_i, prob_indolent_i){
   
   dlog <- if(censor_type_i == "clinical"){
     0
   }else if(is.infinite(tau_HP_i)){
     0
-  }else{
-    p_i <- compute_prob_indolent(tau_HP_i, censor_type_i, censor_time_i, theta)
-    dbinom(indolent_i, 1, p_i, log = TRUE)
+  }else if(indolent_i){ # Bernoulli pmf
+    log(prob_indolent_i)
+  }else if(!indolent_i){
+    log(1-prob_indolent_i)
   }
+  
+    #prob_indolent_i <- compute_prob_indolent(tau_HP_i, censor_type_i, censor_time_i, theta)
+    #dbinom(indolent_i, 1, prob_indolent_i, log = TRUE)
   
   return(dlog)
   
 }
 
-dlog_prop_indolent <- function(indolent, tau_HP, censor_type, censor_time, theta, n_cpu){
+dlog_prop_indolent <- function(indolent, tau_HP, censor_type, prob_indolent, n_cpu){
   mcmapply(
     dlog_prop_indolent_i,
-    indolent, tau_HP, censor_type, censor_time,
-    MoreArgs = list(theta = theta),
+    indolent, tau_HP, censor_type, prob_indolent,
+    #MoreArgs = list(theta = theta),
     mc.cores = n_cpu
   ) %>% sum()
 }
 
 
 #
-# M-H psi ####
+# psi ####
 rprop_psi <- function(theta_cur, epsilon){
   
   psi_prop <- runif(1, theta_cur$psi-epsilon, theta_cur$psi+epsilon)
@@ -474,16 +502,15 @@ rprop_psi <- function(theta_cur, epsilon){
   
 }
 
-#
-# M-H (tau, indolent) ####
+# latent ####
 
-rprop_latent_i <- function(censor_type_i, censor_time_i, age_screen_i, endpoints_i, prob_tau, theta){
+rprop_latent_i <- function(censor_type_i, censor_time_i, endpoints_i, prob_tau_i, prob_indolent_i, theta){
 
   # propose tau
-  tau_HP_new <- rprop_tau_HP(censor_type_i, censor_time_i, endpoints_i, prob_tau, theta)
+  tau_HP_new <- rprop_tau_HP_i(censor_type_i, censor_time_i, endpoints_i, prob_tau_i, theta)
   
   # propose indolent
-  indolent_new <- rprop_indolent_i(tau_HP_new, censor_type_i, censor_time_i, theta)
+  indolent_new <- rprop_indolent_i(tau_HP_new, censor_type_i, prob_indolent_i)
   
   #latent_new <- c("tau_HP" = tau_HP_new, "indolent" = indolent_new)
   latent_new <- c(tau_HP_new, indolent_new)
@@ -493,11 +520,11 @@ rprop_latent_i <- function(censor_type_i, censor_time_i, age_screen_i, endpoints
 }
 
 rprop_latent <- function(
-    censor_type, censor_time, age_screen, endpoints, prob_tau, theta, n_cpu
+    censor_type, censor_time, endpoints, prob_tau, prob_indolent, theta, n_cpu
     ){
   mcmapply(
     rprop_latent_i,
-    censor_type, censor_time, age_screen, endpoints, prob_tau,
+    censor_type, censor_time, endpoints, prob_tau, prob_indolent,
     MoreArgs = list(theta = theta),
     USE.NAMES = FALSE,
     mc.cores = n_cpu
@@ -506,44 +533,48 @@ rprop_latent <- function(
   
 dlog_prop_latent_i <- function(
     tau_HP_i, indolent_i, censor_type_i, censor_time_i, endpoints_i,
-    prob_tau_i, theta
+    prob_tau_i, prob_indolent_i, theta
     ){
   
   # dlog tau
   dlog_tau <- dlog_prop_tau_HP_i(tau_HP_i, censor_type_i, censor_time_i, endpoints_i, prob_tau_i, theta)
   
   # dlog indolent
-  dlog_indolent <- dlog_prop_indolent_i(indolent_i, tau_HP_i, censor_type_i, censor_time_i, theta)
+  dlog_indolent <- dlog_prop_indolent_i(indolent_i, tau_HP_i, censor_type_i, prob_indolent_i)
   
   dlog_prop <- dlog_tau + dlog_indolent
   return(dlog_prop)
   
 }
 
-dlog_prop_latent <- function(tau_HP, indolent, censor_type, censor_time, endpoints, prob_tau, theta, n_cpu){
+dlog_prop_latent <- function(tau_HP, indolent, censor_type, censor_time, endpoints, prob_tau, prob_indolent, theta, n_cpu){
   mcmapply(
     dlog_prop_latent_i,
-    tau_HP, indolent, censor_type, censor_time, endpoints, prob_tau,
+    tau_HP, indolent, censor_type, censor_time, endpoints, prob_tau, prob_indolent,
     MoreArgs = list(theta = theta),
     USE.NAMES = FALSE,
     mc.cores = n_cpu
-  )
+  ) %>% sum()
 }
+
+
+#
+# M-H (tau, indolent) ####
 
 MH_latent_i <- function(tau_HP_cur_i, indolent_cur_i, censor_type_i, censor_time_i, age_screen_i, endpoints_i, n_screen_positive_i, theta){
   
   # propose new latent
-  prob_tau_i     <- compute_prob_tau_i(censor_type_i, censor_time_i, endpoints_i, theta)
-  latent_new_i   <- rprop_latent_i(censor_type_i, censor_time_i, age_screen_i, endpoints_i, prob_tau_i, theta)
-  tau_HP_new_i   <- latent_new_i[1]
-  indolent_new_i <- latent_new_i[2]
+  prob_tau_i          <- compute_prob_tau_i(censor_type_i, censor_time_i, endpoints_i, theta)
+  tau_HP_new_i        <- rprop_tau_HP_i(censor_type_i, censor_time_i, endpoints_i, prob_tau_i, theta)
+  prob_indolent_new_i <- compute_prob_indolent_i(tau_HP_new_i, censor_type_i, censor_time_i, theta)
+  indolent_new_i      <- rprop_indolent_i(tau_HP_new_i, censor_type_i, prob_indolent_new_i)
   
   # M-H acceptance ratio
-  
-  dlog_prop_cur_i <- dlog_prop_latent_i(tau_HP_cur_i, indolent_cur_i, censor_type_i, censor_time_i, endpoints_i, prob_tau_i, theta)
-  dlog_prop_new_i <- dlog_prop_latent_i(tau_HP_new_i, indolent_new_i, censor_type_i, censor_time_i, endpoints_i, prob_tau_i, theta)
-  dlog_lik_cur_i  <- dlog_likelihood_i(tau_HP_cur_i, indolent_cur_i, censor_type_i, censor_time_i, age_screen_i, n_screen_positive_i, theta)
-  dlog_lik_new_i  <- dlog_likelihood_i(tau_HP_new_i, indolent_new_i, censor_type_i, censor_time_i, age_screen_i, n_screen_positive_i, theta)
+  prob_indolent_cur_i <- compute_prob_indolent_i(tau_HP_cur_i, censor_type_i, censor_time_i, theta)
+  dlog_prop_cur_i     <- dlog_prop_latent_i(tau_HP_cur_i, indolent_cur_i, censor_type_i, censor_time_i, endpoints_i, prob_tau_i, prob_indolent_cur_i, theta)
+  dlog_prop_new_i     <- dlog_prop_latent_i(tau_HP_new_i, indolent_new_i, censor_type_i, censor_time_i, endpoints_i, prob_tau_i, prob_indolent_new_i, theta)
+  dlog_lik_cur_i      <- dlog_likelihood_i(tau_HP_cur_i, indolent_cur_i, censor_type_i, censor_time_i, age_screen_i, n_screen_positive_i, theta)
+  dlog_lik_new_i      <- dlog_likelihood_i(tau_HP_new_i, indolent_new_i, censor_type_i, censor_time_i, age_screen_i, n_screen_positive_i, theta)
   
   MH_logratio_i <- dlog_lik_new_i - dlog_lik_cur_i + dlog_prop_cur_i - dlog_prop_new_i
   
@@ -570,6 +601,42 @@ MH_latent <- function(tau_HP_cur, indolent_cur, censor_type, censor_time, age_sc
 #
 # M-H (psi, indolent) ####
 
+rprop_dlog_indolent_i <- function(tau_HP_i, censor_type_i, censor_time_i, theta){
+  
+  prob_indolent_new_i <- compute_prob_indolent_i(tau_HP_i, censor_type_i, censor_time_i, theta)
+  indolent_new_i      <- rprop_indolent_i(tau_HP_i, censor_type_i, prob_indolent_new_i)
+  dlog_prop_new_i     <- dlog_prop_indolent_i(indolent_new_i, tau_HP_i, censor_type_i, prob_indolent_new_i)
+  dlog_lik_new_i      <- dloglik_indolent_i(tau_HP_i, indolent_new_i, censor_type_i, censor_time_i, theta)
+  
+  out <- c(indolent_new_i, dlog_prop_new_i, dlog_lik_new_i)
+  return(out)
+  
+}
+
+rprop_dlog_indolent <- function(tau_HP, censor_type, censor_time, theta, n_cpu){
+  
+  out_mc <- mcmapply(
+    rprop_dlog_indolent_i,
+    tau_HP, censor_type, censor_time,
+    MoreArgs = list(theta = theta),
+    USE.NAMES = FALSE,
+    mc.cores = n_cpu
+  )
+  
+  indolent_new           <- out_mc[1,]
+  dlog_prop_indolent_new <- out_mc[2,] %>% sum()
+  dlog_lik_new           <- out_mc[3,] %>% sum()
+  
+  out <- list(
+    indolent_new=indolent_new, 
+    dlog_prop_indolent_new=dlog_prop_indolent_new, 
+    dlog_lik_new=dlog_lik_new)
+  return(out)
+  
+}
+
+
+
 MH_psi_indolent <- function(
     theta_cur, indolent_cur, tau_HP, censor_type, censor_time, epsilon, prior, n_cpu
     ){
@@ -579,29 +646,34 @@ MH_psi_indolent <- function(
   theta_new <- theta_cur
   theta_new[["psi"]] <- psi_new
   
-  # propose indolent
-  indolent_new <- rprop_indolent(tau_HP, censor_type, censor_time, theta_new, n_cpu)
-  
-  # log likelihood
-  dlog_lik_cur <- dloglik_indolent(tau_HP, indolent_cur, censor_type, censor_time, theta_cur, n_cpu)
-  dlog_lik_new <- dloglik_indolent(tau_HP, indolent_new, censor_type, censor_time, theta_new, n_cpu)
-  
-  # log prior
+  # prior density
   dlog_prior_cur <- dbeta(theta_cur$psi, prior$a_psi, prior$b_psi, log=T)
   dlog_prior_new <- dbeta(theta_new$psi, prior$a_psi, prior$b_psi, log=T)
   
-  # log proposal density
-  dlog_prop_cur <- dlog_prop_indolent(indolent_cur, tau_HP, censor_type, censor_time, theta_cur, n_cpu)
-  dlog_prop_new <- dlog_prop_indolent(indolent_new, tau_HP, censor_type, censor_time, theta_new, n_cpu)
+  # propose indolent, compute log likelihood and log proposal density
+  out <- rprop_dlog_indolent(tau_HP, censor_type, censor_time, theta_new, n_cpu)
+  #indolent_new           <- rprop_indolent(tau_HP, censor_type, prob_indolent_new, n_cpu)
   
+  # proposal density
+  prob_indolent_cur      <- compute_prob_indolent(tau_HP, censor_type, censor_time, theta_cur, n_cpu)
+  dlog_prop_indolent_cur <- dlog_prop_indolent(indolent_cur, tau_HP, censor_type, prob_indolent_cur, n_cpu)
+  dlog_prop_indolent_new <- out[["dlog_prop_indolent_new"]]
+  #prob_indolent_new      <- compute_prob_indolent(tau_HP, censor_type, censor_time, theta_new, n_cpu)
+  #dlog_prop_indolent_new <- dlog_prop_indolent(indolent_new, tau_HP, censor_type, prob_indolent_new, n_cpu)
+  
+  # log likelihood
+  dlog_lik_cur <- dloglik_indolent(tau_HP, indolent_cur, censor_type, censor_time, theta_cur, n_cpu)
+  dlog_lik_new <- out[["dlog_lik_new"]]
+  #dlog_lik_new <- dloglik_indolent(tau_HP, indolent_new, censor_type, censor_time, theta_new, n_cpu)
+
   # M-H acceptance ratio
   MH_logratio <- dlog_lik_new   - dlog_lik_cur + 
                  dlog_prior_new - dlog_prior_cur + 
-                 dlog_prop_cur  - dlog_prop_new 
+                 dlog_prop_indolent_cur  - dlog_prop_indolent_new 
   
   out <- if(runif(1) < exp(MH_logratio)){ # accept new values
-    list(indolent = indolent_new, theta = theta_new, accept = TRUE)
-  }else{ # keep current values
+    list(indolent = out[["indolent_new"]], theta = theta_new, accept = TRUE)
+  } else { # keep current values
     list(indolent = indolent_cur, theta = theta_cur, accept = FALSE)
   }
 
@@ -615,17 +687,18 @@ MH_psi_indolent <- function(
 MCMC <- function(
     d_process, d_obs_screen, d_obs_censor,
     theta_0, prior, epsilon,
-    m = 100,
-    thin = 1,
-    n_cpu = 1
+    M = 100, thin = 1,
+    n_cpu = 1, verbose = FALSE
     ){
   
   {
+    
+  # setup
   n_obs <- nrow(d_process)
   
-  m_thin <- m / thin
-  RATE_H <- RATE_P <- BETA <- PSI <- ACCEPT_PSI <- numeric(m_thin)
-  TAU_HP <- INDOLENT <- ACCEPT_LATENT <- matrix(nrow = m_thin, ncol = n_obs)
+  M_thin <- M / thin
+  RATE_H <- RATE_P <- BETA <- PSI <- ACCEPT_PSI <- numeric(M_thin)
+  TAU_HP <- INDOLENT <- ACCEPT_LATENT <- matrix(nrow = M_thin, ncol = n_obs)
   
   # pre-process data
   theta <- theta_0  
@@ -639,14 +712,16 @@ MCMC <- function(
   endpoints               <- compute_endpoints(age_screen, censor_type, censor_time, n_cpu)
 
   # initialisation of latent variables
-  prob_tau_0  <- compute_prob_tau(censor_type, censor_time, endpoints, theta, n_cpu)
-  latent_data <- rprop_latent(censor_type, censor_time, age_screen, endpoints, prob_tau_0, theta, n_cpu)
+  prob_tau_0      <- compute_prob_tau(censor_type, censor_time, endpoints, theta, n_cpu)
+  prob_indolent_0 <- compute_prob_indolent(tau_HP, censor_type, censor_time, theta, n_cpu)
+  latent_data <- rprop_latent(censor_type, censor_time, endpoints, prob_tau_0, prob_indolent_0, theta, n_cpu)
   tau_HP      <- latent_data[1,]
   indolent    <- latent_data[2,]
   
   # MCMC
   tic()
-  for(n in 1 : m){ print(n)
+  for(m in 1 : M){ 
+    if(verbose)  print(paste0("n=", n_obs, "-M=", M, "-n_cpu=", n_cpu, "-epsilon=", epsilon, " -- ", m, "/", M, " = ", round(100*m/M, 2), "%"))
     
     # update (rate_H, rate_P, beta)
     rate_H <- gibbs_rate_H(tau_HP, theta, prior, censor_time)
@@ -670,21 +745,20 @@ MCMC <- function(
     accept_latent <- out_latent[3,]
     
     # save output
-    if(n %% thin == 0){
+    if(m %% thin == 0){
       
-      n_thin <- n %/% thin
+      m_thin <- m %/% thin
       
-      RATE_H  [n_thin ] <- rate_H
-      RATE_P  [n_thin ] <- rate_P
-      BETA    [n_thin ] <- beta
-      PSI     [n_thin ] <- theta$psi
-      TAU_HP  [n_thin,] <- tau_HP
-      INDOLENT[n_thin,] <- indolent
-      ACCEPT_LATENT[n_thin,] <- accept_latent
-      ACCEPT_PSI   [n_thin ] <- accept_psi
+      RATE_H  [m_thin ] <- rate_H
+      RATE_P  [m_thin ] <- rate_P
+      BETA    [m_thin ] <- beta
+      PSI     [m_thin ] <- theta$psi
+      TAU_HP  [m_thin,] <- tau_HP
+      INDOLENT[m_thin,] <- indolent
+      ACCEPT_LATENT[m_thin,] <- accept_latent
+      ACCEPT_PSI   [m_thin ] <- accept_psi
       
     }
-  
     
   }
   
@@ -699,7 +773,9 @@ MCMC <- function(
   
   out <- list(
     THETA=THETA, TAU_HP=TAU_HP, INDOLENT=INDOLENT,
-    ACCEPT_LATENT=ACCEPT_LATENT, ACCEPT_PSI=ACCEPT_PSI,
+    ACCEPT_LATENT=ACCEPT_LATENT, 
+    ACCEPT_PSI=ACCEPT_PSI,
+    epsilon=epsilon,
     runtime=runtime
     )
   return(out)

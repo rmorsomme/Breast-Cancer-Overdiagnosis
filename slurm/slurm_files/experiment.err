@@ -1,1 +1,2 @@
-/var/spool/slurmd/job24576945/slurm_script: line 12: Export: command not found
+/var/spool/slurmd/job27335964/slurm_script: line 13: Export: command not found
+/opt/apps/rhel8/R-4.1.1/lib64/R/bin/BATCH: line 60: 531341 Segmentation fault      ${R_HOME}/bin/R -f ${in} ${opts} ${R_BATCH_OPTIONS} > ${out} 2>&1

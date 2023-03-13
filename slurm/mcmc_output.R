@@ -1,18 +1,23 @@
 
 rm(list = ls())
+{
+  n <- 1e4
+  M <- 1e4
+  factor_0 <- 1
+  n_cpu <- 2
+  path_mcmc   <- "output/MCMC"
+  file_id     <- paste0(path_mcmc, "/MCMC-n=", n, "-M=", M, "-factor0=", factor_0, "-n_cpu=", n_cpu, ".RDATA")
+  
+  setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis/slurm")
+  load(file_id)
+}
 
-n <- 1e4
-m <- 1e3
-factor_0 <- 1
-path_mcmc   <- "output/MCMC"
-file_id     <- paste0(path_mcmc, "/MCMC-n=", n, "-m=", m, "-factor0=", factor_0, "-n_cpu=", n_cpu, ".RDATA")
-
-setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis/slurm")
-load(file_id)
+#
+# Run time ####
+(runtime <- out$runtime)
 
 #
 # Parameters ####
-
 {
   THETA <- out$THETA
   
@@ -75,7 +80,6 @@ coda::effectiveSize(BETA) %>% print()
 }
 
 {
-runtime <- out$runtime
 (coda::effectiveSize(RATE_H)/runtime) %>% print()
 (coda::effectiveSize(RATE_P)/runtime) %>% print()
 (coda::effectiveSize(PSI)   /runtime) %>% print()
@@ -92,26 +96,28 @@ round(cor(THETA), 2)
 #
 # Latent data ####
 {
-  TAU_HP        <- out$TAU_HP
-  TAU_HP_inf    <- is.infinite(TAU_HP)
-  ACCEPT_LATENT <- out$ACCEPT_LATENT
-  ACCEPT_PSI    <- out$ACCEPT_PSI
-  tau_inf_rate  <- colMeans(TAU_HP_inf)
+  TAU_HP             <- out$TAU_HP
+  TAU_HP_inf         <- is.infinite(TAU_HP)
+  ACCEPT_LATENT      <- out$ACCEPT_LATENT
+  ACCEPT_PSI         <- out$ACCEPT_PSI
+  tau_inf_rate       <- colMeans(TAU_HP_inf)
+  accept_latent_rate <- colMeans(ACCEPT_LATENT)
   
-  mean(ACCEPT_PSI)
+  mean(ACCEPT_PSI) %>% print()
+  mean(accept_latent_rate) %>% print()
 }
 #
 ## group ####
 
-group_id <- c("clinical", "screen", "censored")[1]
+group_id <- c("clinical", "screen", "censored")[2]
 
 {
   ids <- which(d_obs_censor$censor_type==group_id)
-  accept_rate_group  <- accept_rate [ids]
+  accept_rate_group  <- accept_latent_rate[ids]
   tau_inf_rate_group <- tau_inf_rate[ids]
   
-  summary(accept_rate_group) %>% print
-  order(accept_rate_group)[1:10] %>% print
+  summary(accept_rate_group) %>% print()
+  order(accept_rate_group)[1:10] %>% print()
 }
 
 if(group_id == "censored"){
@@ -132,17 +138,18 @@ plot(d_obs_censor$censor_time[ids], accept_rate_group)
 {
   i_lowest_accept  <- order(accept_rate_group)[1]
   i_highest_accept <- order(accept_rate_group)[length(accept_rate_group)]
-  i <- ids[i_highest_accept]
-  filter(d_obs_screen, person_id == i) %>% print
-  d_process[i,] %>% print
-  d_obs_censor[i,] %>% print
+  i <- ids[i_lowest_accept]
+  
+  d_process[i,] %>% print()
+  d_obs_censor[i,] %>% print()
+  filter(d_obs_screen, person_id == i) %>% print()
   
   mcmc_tau     <- TAU_HP[,i]
   mcmc_tau_inf <- TAU_HP_inf[,i]
-  tau_true <- d_process[i, "tau_HP"]
+  tau_true     <- d_process[i, "tau_HP"]
 }
 
-accept_rate[i]
+accept_latent_rate[i]
 
 if(group_id == "censored")  plot(mcmc_tau_inf, type="l")
 

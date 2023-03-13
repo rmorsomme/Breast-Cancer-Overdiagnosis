@@ -2,6 +2,7 @@
 #SBATCH --nodes=1
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=5
+#SBATCH -a 1-12
 #SBATCH -o slurm_files/experiment.out
 #SBATCH -e slurm_files/experiment.err
 #SBATCH -p common,statdept
