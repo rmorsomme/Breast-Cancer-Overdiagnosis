@@ -17,12 +17,12 @@ if(is.na(n_cpu))  n_cpu <- 1
 
 #
 # Data ####
-data_origin <- "Swiss"
+data_origin <- c("BCSC", "Swiss")[1]
 
 if(data_origin == "BCSC"){
   
     load("data/processed/BCSC_40_to_85.RDATA")
-    AFS_low <- 50
+    AFS_low <- 45
     AFS_upp <- 74
     n   <- min(1e5, nrow(d_obs_censor %>% filter(AFS %>% between(AFS_low, AFS_upp))))
   
@@ -37,6 +37,8 @@ if(data_origin == "BCSC"){
 }else if(data_origin == "Swiss"){
   
     load("data/processed/swiss.RDATA")
+    AFS_low <- NA
+    AFS_upp <- NA
   
 }
 
@@ -46,20 +48,21 @@ if(data_origin == "BCSC"){
 #
 # Model setup ####
 t0      <- 40 # for Swiss data, need to check that there is no screen before age t0
-shape_H <- 2 # should be 2 (linear hazard rate) or larger
+shape_H <- 2  # should be 2 (linear hazard rate) or larger
 shape_P <- 1
 
 
 #
 # MCMC setup ####
-M       <- 1e3 # number of MCMC iterations
+M       <- 1e4 # number of MCMC iterations
 thin    <- round(max(M/1e3, 1))
 
-epsilon_rate_H <- 2e-5 # tuning parameter
+epsilon_rate_H <- 2e-5 # step size of RW MH
 epsilon_rate_P <- 0.1
 epsilon_psi    <- 0.075
 
-rate_H_0 <- (85/gamma(1+1/shape_H))^(-shape_H) # gives a Weibull with a mean of 85 years.
+mean_H_0 <- 85
+rate_H_0 <- (mean_H_0/gamma(1+1/shape_H))^(-shape_H) # this gives a Weibull with mean mean_H_0
 theta_0  <- list( # initial values for theta
     rate_H = rate_H_0, shape_H = shape_H,
     rate_P = 0.2  , shape_P = shape_P,
@@ -99,12 +102,12 @@ out <- MCMC(
 
 #
 # Output ####
-path_mcmc  <- "output/MCMC/BCSC"
+
+path_mcmc  <- paste0("output/MCMC/", data_origin)
 sim_id     <- paste0(
-    "data_origin=", data_origin,
-    "-M=", M,
-    #"-AFS_low=", AFS_low,
-    #"-AFS_upp=", AFS_upp,
+    "M=", M,
+    "-AFS_low=", AFS_low,
+    "-AFS_upp=", AFS_upp,
     "-shape_H=", shape_H,
     "-shape_P=", shape_P,
     "-t0=", t0,

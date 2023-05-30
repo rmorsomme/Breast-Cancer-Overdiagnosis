@@ -8,11 +8,12 @@
     
     M     <- 5e3
     
-    path_mcmc  <- "output/MCMC/BCSC"
-    path_fig   <- "output/figures/BCSC"
+    data_origin <- c("BCSC", "Swiss")[1]
+    path_mcmc  <- paste0("output/MCMC/"   , data_origin)
+    path_fig   <- paste0("output/figures/", data_origin)
     shape_H <- 2 # 1, 1.1, 1.5, 2 ,2.5, 3, 3.5
     shape_P <- 1
-    AFS_low <- 50
+    AFS_low <- 45
     AFS_upp <- 74
     t0  <- 40
     precision_mean_P <- 0
@@ -25,7 +26,7 @@
         "-shape_H=", shape_H,
         "-shape_P=", shape_P,
         "-t0=", t0,
-        "-mean_mean_p=", mean_mean_p,
+        "-mean_mean_P=", mean_mean_P,
         "-precision_mean_P=", precision_mean_P,
         ".RDATA"
     )
