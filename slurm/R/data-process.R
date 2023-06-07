@@ -79,7 +79,7 @@ d_woman    <- read_delim(file = paste0(path, "woman.csv"     ), delim = ";") %>%
         endpointdt     = if_else(endpointdt != "99999999", endpointdt, NA_character_) %>% dmy,
         age_endpoint   = ((endpointdt - birthdate) / 365) %>% as.numeric()
     ) %>%
-    select(person_id = nodoss, birthdate, age_endpoint, detec_amended_recoding, endpointdt, endpoint_year)
+    select(person_id = nodoss, birthdate, age_endpoint, detec_amended_recoding, endpointdt)
 
 
 ## Merge data sets ####
@@ -115,9 +115,9 @@ d_full <- inner_join(d_exam, d_woman, by = "person_id") %>% # use an inner join 
         exam_year_first = examdt %>% min %>% year # calendar year of first exam (will be used to take a subset of the data)
     ) %>%
     ungroup() %>%
-    select(person_id, screen_id, age_screen, exam_year_first, age_endpoint, endpoint_year, AFS, censor_type)
+    select(person_id, screen_id, age_screen, exam_year_first, age_endpoint, AFS, censor_type)
 
-count(d_full, exam_year_first) %>% print(n=1e2)
+count(d_full, exam_year_first) %>% print(n=nrow(.))
 
 ## Take a subset ####
 d_full_sub <- d_full %>%

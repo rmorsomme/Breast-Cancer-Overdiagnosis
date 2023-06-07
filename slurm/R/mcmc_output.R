@@ -1,12 +1,13 @@
 
 
 {
+    rm(list = ls())
     setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis/slurm")
     library(tidyverse)
-    source("R/helpers.R") # load helper functions
-    load("data/processed/BCSC_40_to_85.RDATA")
+    #source("R/helpers.R") # load helper functions
+    #load("data/processed/BCSC_40_to_85.RDATA")
     
-    M     <- 5e3
+    M     <- 1e4
     
     data_origin <- c("BCSC", "Swiss")[1]
     path_mcmc  <- paste0("output/MCMC/"   , data_origin)
@@ -17,7 +18,7 @@
     AFS_upp <- 74
     t0  <- 40
     precision_mean_P <- 0
-    mean_mean_p <- 0
+    mean_mean_P <- 0
     
     sim_id     <- paste0(
         "M=", M,

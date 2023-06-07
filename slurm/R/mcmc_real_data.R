@@ -47,7 +47,7 @@ if(data_origin == "BCSC"){
 
 #
 # Model setup ####
-t0      <- 40 # for Swiss data, need to check that there is no screen before age t0
+t0      <- 30 # for Swiss data, need to check that there is no screen before age t0
 shape_H <- 2  # should be 2 (linear hazard rate) or larger
 shape_P <- 1
 
