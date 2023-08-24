@@ -9,6 +9,17 @@ using namespace Rcpp;
 // [[Rcpp::depends(RcppEigen)]]
 // [[Rcpp::depends(RcppNumerical)]]
 
+// -----------------------------------------------------------------------------
+// There are 3 groups:
+//   Grp1 satisfy I(T_i < age_at_tau_hp_i < age_at_tau_pc_i)
+//   Grp2 satisfy I(age_at_tau_hp_i < T_i < age_at_tau_pc_i)
+//   Grp3 satisfy I(age_at_tau_hp_i < age_at_tau_pc_i == T_i)
+// I use this notation in comments.
+//   Grp1 come from censored cases; 
+//   Grp2 come from screen or censored cases;
+//   Grp3 come from clinical cases
+// -----------------------------------------------------------------------------
+
 // Recreation of R's rep when two vectors are provided
 //
 // @param x NumericVector The values to be repeated.
@@ -16,6 +27,7 @@ using namespace Rcpp;
 //   Vector must be of the same length as input `x`.
 //
 // @returns NumericVector of length sum(times)
+//
 // @keywords internal
 // [[Rcpp::plugins(cpp11)]]
 NumericVector repVec(const NumericVector& x, const IntegerVector& times) {
@@ -33,6 +45,7 @@ NumericVector repVec(const NumericVector& x, const IntegerVector& times) {
     return res;
 }
 
+
 //
 // Weibull ////////
 
@@ -43,19 +56,21 @@ NumericVector repVec(const NumericVector& x, const IntegerVector& times) {
 // @param shape double The shape parameter of a Weibull distribution. Must be > 0.
 //
 // @returns double The scale parameter of the Weibull distribution. Will be > 0.
+//
 // @keywords internal
 double rate2scale(double rate, double shape) {
     NumericVector temp(1, rate);
     return Rcpp::pow(temp, -1.0 / shape)[0];
 }
 
-// Given a parameter list with updated rates, calculate new scales
+// Given a parameter List with updated rates, calculate new scales
 //
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
 //
 // @returns List The input `theta` with updated elements `$scale_H`
 //   and `$scale_P`.
+//
 // @keywords internal
 List update_scales(List theta) {
     theta["scale_H"] = rate2scale(theta["rate_H"], theta["shape_H"]);
@@ -63,7 +78,7 @@ List update_scales(List theta) {
     return theta;
 }
 
-// Calculate the difference between a Weibull CDF evaluated at two locations.
+// Probability P(a < X <= b) for a Weibull distribution
 //
 // Note: Differences are taken between element i of input `b` and element i of
 //   input `a`.
@@ -77,7 +92,8 @@ List update_scales(List theta) {
 //   Must be > 0.
 //
 // @returns NumericVector The ith element is the difference in the Weibull
-//   distribution at the ith quantiles of inputs `a` and `b`.
+//   CDF at the ith quantiles of inputs `a` and `b`.
+//
 // @keywords internal
 NumericVector pweibull_ab(NumericVector a, 
                           NumericVector b, 
@@ -88,8 +104,7 @@ NumericVector pweibull_ab(NumericVector a,
         pweibull(a, shape, scale, true, false);
 }
 
-// Random sample of x for which the CDF of a Weibull distribution falls between
-//   CDF(a) and CDF(b) -- there has to be a more intuitive definition than this!
+// A bounded random sample from the Weibull distribution.
 //
 // Note: Upper and lower limits are taken in pairs from inputs `a` and `b`; 
 //   i.e., element i of `a` is the lower bound, element i of `b` is the upper
@@ -103,7 +118,8 @@ NumericVector pweibull_ab(NumericVector a,
 // @param scale double The scale parameter of the Weibull distribution.
 //   Must be > 0.
 //
-// @returns NumericVector The sampled values.
+// @returns NumericVector The generated samples.
+//
 // @keywords internal
 NumericVector rweibull_trunc(NumericVector a, 
                              NumericVector b, 
@@ -113,7 +129,7 @@ NumericVector rweibull_trunc(NumericVector a,
     NumericVector low = pweibull(a, shape, scale);
     NumericVector high = pweibull(b, shape, scale);
     
-    NumericVector u(low.size());
+    NumericVector u = no_init(low.size());
     // populate each element of `u`, u_i, with a random draw from U(low_i, high_i)
     std::transform(low.begin(), 
                    low.end(), 
@@ -123,22 +139,26 @@ NumericVector rweibull_trunc(NumericVector a,
     return qweibull(u, shape, scale);
 }
 
-// Need an intuitive title here
+// Truncated Weibull Probability Density
+// STH I was expecting an indicator function for values outside of the range
 //
 // @param x NumericVector A vector of one or more quantiles at which the
 //   density is evaluated.
 // @param a NumericVector A vector of one or more quantiles. Must be the
-//   same length as input `x`.
+//   same length as input `x`. The lower boundary of the reduced support.
 // @param b NumericVector A vector of one or more quantiles. Must be the
-//   same length as input `x`.
+//   same length as input `x`. The upper boundary of the reduced support
 // @param shape double The shape parameter of the Weibull distribution.
 //   Must be > 0.
 // @param scale double The scale parameter of the Weibull distribution.
 //   Must be > 0.
 // @param uselog bool If TRUE, probabilities p are returned as log(p).
 //
-// @returns NumericVector The density of the Weibull 
-//   distribution constrained to lie between the paired boundaries. (??)
+// @returns NumericVector If uselog = false
+//     f(x; shape, scale) / {F(a; shape, scale) - F(b; shape, scale)}
+//   if uselog = true
+//     ln[ f(x; shape, scale) / {F(a; shape, scale) - F(b; shape, scale)} ]
+//
 // @keywords internal
 NumericVector dweibull_trunc(NumericVector x, 
                              NumericVector a, 
@@ -147,8 +167,10 @@ NumericVector dweibull_trunc(NumericVector x,
                              double scale, 
                              bool uselog) {
     if (uselog) {
+        // ln[ f(x; shape, scale) / {F(a; shape, scale) - F(b; shape, scale)} ]
         return dweibull(x, shape, scale, true) - log(pweibull_ab(a, b, shape, scale));
     } else {
+        // f(x; shape, scale) / {F(a; shape, scale) - F(b; shape, scale)}
         return dweibull(x, shape, scale, false) / pweibull_ab(a, b, shape, scale);
     }
 }
@@ -164,6 +186,7 @@ NumericVector dweibull_trunc(NumericVector x,
 //
 // @returns List The input `theta` with updated elements `$rate_H` and
 //  `$scale_H`.
+//
 // @keywords internal
 List add_rate_H(List theta, double rate_H) {
     theta["rate_H"] = rate_H;
@@ -178,6 +201,7 @@ List add_rate_H(List theta, double rate_H) {
 //
 // @returns List The input `theta` with updated elements `$rate_P` and
 //  `$scale_P`.
+//
 // @keywords internal
 List add_rate_P(List theta, double rate_P) {
     theta["rate_P"] = rate_P;
@@ -191,6 +215,7 @@ List add_rate_P(List theta, double rate_P) {
 // @param beta double The new value to be stored in element `$beta`.
 //
 // @returns List The input `theta` with updated element `$beta`.
+//
 // @keywords internal
 List add_beta(List theta, double beta) {
     theta["beta"] = beta;
@@ -204,6 +229,7 @@ List add_beta(List theta, double beta) {
 // @param psi double The new value to be stored in element `$psi`.
 //
 // @returns List The input `theta` with updated element `$psi`.
+//
 // @keywords internal
 List add_psi(List theta, double psi) {
     theta["psi"] = psi;
@@ -213,54 +239,64 @@ List add_psi(List theta, double psi) {
 //
 // Gibbs theta ////////
 
-// Update beta value
+// Update beta value based on current healthy -> pre-clinical transition times.
 //
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param prior List The distribution parameters of the prior.
-// @param tau_HPs List The current estimates for tau broken down according to
-//   the censor type. There are 3 elements. The 1st contains the tau estimates
-//   for censor_type = "screen" cases; the 2nd the tau estimates for
-//   censor_type = "censored" cases; and the 3rd the tau estimates for
-//   censor_type = "clinical" cases.
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param n_screen_positive integer The total number of positive screens.
+// @param n_screen_positive A scalar integer specifying the number of 
+//   participants whose healthy -> pre-clinical transitions were detected
+//   through a screening, i.e., the total number of participants for whom 
+//   censor type is "screen".
 //
 // @returns List The input `theta` with updated element `$beta`.
+//
+// @keywords internal
 List gibbs_beta(List data_objects, 
                 List prior, 
-                List tau_HPs,
+                List age_at_tau_hp_hats,
                 List theta, 
                 int n_screen_positive) { // beta prior and binomial likelihood conjugacy
     
     IntegerVector lengths;
-    NumericVector ages, tau, tmp_tau;
+    NumericVector ages, age_at_tau, tmp_age_at_tau;
     LogicalVector cmp;
     
-    List age_screen;
-    List obj;
+    List age_screen, obj;
     
     int n_screen = 0;
+    
+    // count the total number of screens that occurred after the current
+    // estimated age at time of healthy -> pre-clinical transition
     for (int i = 0; i < data_objects.size(); ++i) {
         obj = data_objects[i];
         
+        // extract vectorized age data for current censor type
         age_screen = obj["ages_screen"];
         ages = age_screen["values"];
         lengths = age_screen["lengths"];
         
-        tau = tau_HPs[i];
+        // extract age at time of transition and extend to correlate with 
+        // vectorized age structure
+        age_at_tau = age_at_tau_hp_hats[i];
+        tmp_age_at_tau = repVec(age_at_tau, lengths);
         
-        tmp_tau = repVec(tau, lengths);
-        cmp = ages > tmp_tau;
+        // count the number of screens that occurred after the transition time
+        cmp = ages > tmp_age_at_tau;
         n_screen += sum(as<IntegerVector>(cmp));
     }
     
     double a_beta = prior["a_beta"];
     double b_beta = prior["b_beta"];
+    // a* = a0 + {# of screens that successfully detected pre-clinical cancers}
     double a_n = a_beta + n_screen_positive;
+    // b* = b0 + {# of screens that failed to detect pre-clinical cancers}
     double b_n = b_beta + n_screen - n_screen_positive;
     double beta_new = rbeta(1, a_n, b_n)[0];
     
@@ -270,180 +306,212 @@ List gibbs_beta(List data_objects,
 //
 // Likelihood ////////
 
-// Derivative of the log-likelihood w.r.t the sojourn time for all individuals
+// Derivative of the log-likelihood w.r.t. the sojourn time in the healthy state
+//   for all individuals of a specific censor type
 //
-// @param data_object List The data for a single censoring type.
+// @param data_object List The data for a single censor type.
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param tau_HP NumericVector The current estimated tau for all
-//   individuals of the censor_type under consideration.
+// @param age_at_tau_hp_hat NumericVector The current estimated age at time of 
+//   healthy -> pre-clinical transition for all participants of the censor type 
+//   under consideration.
 // @param t0 A scalar double The initial time.
 //
-// @returns NumericVector The derivative of the log-likelihood wrt the
-//   sojourn time for each individual.
+// @returns NumericVector  Each element provides
+//   Grp1 ln[ F_h(T_i - t0) ] + {Grp2 + Grp3} ln[ f_h(tau_hp_hat_i) ]
+//
 // @keywords internal
 NumericVector dloglik_sojourn_H_obj(List data_object, 
                                     List theta,
-                                    NumericVector tau_HP,
+                                    NumericVector age_at_tau_hp_hat,
                                     double t0) {
     
+    // this is a bit of a misnomer. more of an event/censor age as this
+    // time is either the age at diagnosis of clinical cancer, age at 
+    // screen detection of pre-clinical cancers, or age at censoring
     NumericVector censor_time = data_object["censor_time"];
     int n = data_object["n"];
     
-    NumericVector result(n);
+    NumericVector result = no_init(n);
     
-    LogicalVector isInfinite = is_infinite(tau_HP);
+    LogicalVector isInfinite = is_infinite(age_at_tau_hp_hat);
     
+    // for participants that have an infinite age at time of transition, that is
+    // so-called "healthy at censoring time",
+    // F_h(T_i - t0, shape, scale); Pr(tau_hp <= T_i - t0)
     NumericVector vec1 = censor_time[isInfinite];
     NumericVector result_infinite = pweibull(vec1 - t0,
                                              theta["shape_H"],
-                                                  theta["scale_H"],
-                                                       false, true);
+                                             theta["scale_H"],
+                                             false, true);
     result[isInfinite] = result_infinite;
     
-    vec1 = tau_HP[!isInfinite];
+    // for participants that have a finite estimated age at time of transition,
+    // i.e., those participants in Grp2 and Grp3
+    // f_h(age_at_tau_hp_hat_i - t0, shape, scale); Pr(tau_hp == tau_hp_hat)
+    vec1 = age_at_tau_hp_hat[!isInfinite];
     NumericVector result_finite = dweibull(vec1 - t0,
                                            theta["shape_H"],
-                                                theta["scale_H"],
-                                                     true);
+                                           theta["scale_H"],
+                                           true);
     
     result[!isInfinite] = result_finite;
     return result;
 }
 
-// Sum of the derivative of the log-likelihood w.r.t the sojourn time for over
-//   all individuals
+// Sum of the derivative of the log-likelihood w.r.t. the sojourn time in the
+//   healthy state over all individuals
 //
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
-// @param tau_HP List The current estimates for tau broken down
-//   according to the censor type. There are 3 elements. The 1st contains the
-//   tau estimates for censor_type = "screen" cases; the 2nd the data for
-//   censor_type = "censored" cases; and the 3rd the data for
-//   censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
 // @param t0 A scalar double The initial time.
 //
-// @returns double The sum of the derivative of the log-likelihood wrt
-//   the sojourn time over all individuals.
+// @returns double 
+// sum_i = 1, n
+//   Grp1 ln[ F_h(T_i - t0) ] + {Grp2 + Grp3} ln[ f_h(tau_hp_hat_i) ]
+//
 // @keywords internal
 double dloglik_sojourn_H_sum(List data_objects, 
-                             List tau_HPs,
-                             List theta, double t0) {
+                             List age_at_tau_hp_hats,
+                             List theta, 
+                             double t0) {
     double result = 0.0;
     for (int i = 0; i < data_objects.size(); ++i) {
-        result += sum(dloglik_sojourn_H_obj(data_objects[i], theta, tau_HPs[i], t0));        
+        result += sum(dloglik_sojourn_H_obj(data_objects[i], theta, 
+                                            age_at_tau_hp_hats[i], t0));        
     }
     return result;
 }
 
-// Derivative of the log-likelihood w.r.t the sojourn time for all individuals
+// Derivative of the log-likelihood w.r.t. the sojourn time in the progressive
+//   pre-clinical state for all individuals of a specific censor type
 //
 // @param data_object List The data for a single censor type.
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param tau_HP NumericVector The current estimated tau for the
-//   censor type under consideration.
+// @param age_at_tau_hp_hat NumericVector The current estimated age at time of 
+//   healthy -> pre-clinical transition for all participants of the censor type 
+//   under consideration.
 // @param indolent IntegerVector 0/1 indicating if is not/is indolent.
 //
-// @returns NumericVector The derivative of the log-likelihood wrt the
-//   sojourn time for each individual.
+// @returns NumericVector  Each element providing
+//   Grp1 {0}
+//   Grp2 I(ind_i == 0) ln[ F_P(tau_p_hat_i) ]
+//   Grp3 I(ind_i == 0) ln[ f_P(tau_p_hat_i) ]
+//
 // @keywords internal
 NumericVector dloglik_sojourn_P_obj(List data_object, 
                                     List theta, 
-                                    NumericVector tau_HP,
+                                    NumericVector age_at_tau_hp_hat,
                                     IntegerVector indolent) {
     
+    // this is a bit of a misnomer. more of an event/censor age as this
+    // time is either the age at diagnosis of clinical cancer, age at 
+    // screen detection of pre-clinical cancers, or age at censoring
     NumericVector censor_time = data_object["censor_time"];
+    
     int censor_type = data_object["censor_type"];
     int n = data_object["n"];
     
     NumericVector result(n, 0.0);
     
-    LogicalVector subset = is_finite(tau_HP) & indolent == 0;
-    NumericVector vec1 = censor_time[subset] - tau_HP[subset];
+    // subset includes participants with progressive tumors from Grp2 and Grp3
+    LogicalVector subset = is_finite(age_at_tau_hp_hat) & indolent == 0;
+    NumericVector tau_p_hat = censor_time[subset] - age_at_tau_hp_hat[subset];
     
     if (censor_type == 3) {
-        NumericVector res = dweibull(vec1, theta["shape_P"], theta["scale_P"], true);
+        // Grp3
+        // ln[ f_p(T - age_at_tau_hp_hat)]; ln[ Pr(tau_p == tau_p_hat) ]
+        NumericVector res = dweibull(tau_p_hat, theta["shape_P"], 
+                                     theta["scale_P"], true);
         result[subset] = res;
     } else {
-        NumericVector res = pweibull(vec1, theta["shape_P"], theta["scale_P"], false, true);
+        // Grp2
+        // ln[ F_P(T - age_at_tau_hp_hat) ]; ln[ Pr(tau_p <= tau_p_hat) ]
+        NumericVector res = pweibull(tau_p_hat, theta["shape_P"], 
+                                     theta["scale_P"], false, true);
         result[subset] = res;
     }
     
     return result;
 }
 
-// Sum of the derivative of the log-likelihood w.r.t the sojourn time over all 
-//   individuals
+// Sum of the derivative of the log-likelihood w.r.t. the sojourn time in the
+//   progressive pre-clinical state over all individuals
 //
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param indolents List The current estimates for 0/1 indolent.
-//   The 1st contains the indolent estimates for censor_type = "screen" cases; 
-//   the 2nd the data for censor_type = "censored" cases; and the 3rd the data
-//   for censor_type = "clinical" cases.
-// @param tau_HP List The current estimates for tau broken down
-//   according to the censor type. There are 3 elements. The 1st contains the
-//   tau estimates for censor_type = "screen" cases; the 2nd the data for
-//   censor_type = "censored" cases; and the 3rd the data for
-//   censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according 
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
 //
-// @returns double The sum of the derivative of the log-likelihood wrt
-//   the sojourn time over all individuals.
+// @returns double 
+// sum_i = 1, n
+//   Grp1 {0}
+//   Grp2 I(ind_i == 0) ln[ F_P(tau_p_hat_i) ]
+//   Grp3 I(ind_i == 0) ln[ f_P(tau_p_hat_i) ]
+//
 // @keywords internal
 double dloglik_sojourn_P_sum(List data_objects, 
                              List indolents, 
-                             List tau_HPs, 
+                             List age_at_tau_hp_hats, 
                              List theta) {
     double result = 0.0;
     for (int i = 0; i < data_objects.size(); ++i) {
         result += sum(dloglik_sojourn_P_obj(data_objects[i],
                                             theta, 
-                                            tau_HPs[i],
-                                                   indolents[i]));
+                                            age_at_tau_hp_hats[i],
+                                            indolents[i]));
     }
     return result;
 }
 
-// Derivative of the log-likelihood w.r.t. ... for a single censor type
+// Derivative of the log-likelihood w.r.t. the parameter of the
+//   model for the probability of being indolent for a single censor type
 //
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
 // @param indolent IntegerVector 0/1 indicating is not/is indolent.
 //
-// @returns NumericVector The derivative of the log-likelihood wrt 
-//   indolence for each individual.
+// @returns NumericVector Each element provides
+//   ln[psi] I(ind_i == 1) + ln[1 - psi] I(ind_i == 0)
+//
 // @keywords internal
 NumericVector dloglik_indolent_obj(List theta, IntegerVector indolent) {
     double psi = theta["psi"];
     
     int n = indolent.size();
     
-    NumericVector result(n);
+    NumericVector result = no_init(n);
     result[indolent == 1] = log(psi);
     result[indolent == 0] = log(1.0 - psi);
     return result;    
 }
 
-// Derivative of the log-likelihood w.r.t. ... for all individuals
+// Derivative of the log-likelihood w.r.t. the parameter of the
+//   model for the probability of being indolent for all individuals
 //
 // @param indolents List The current estimates for 0/1 indolent.
-//   The 1st contains the indolent estimates for censor_type = "screen" cases; 
-//   the 2nd the data for censor_type = "censored" cases; and the 3rd the data
-//   for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
 //
-// @returns List The sum of the derivative of the log-likelihood wrt
-//   the sojourn time over all individuals in each censor type.
+// @returns List 
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+//   Each element is a NumericVector providing
+//     ln[psi] I(ind_i == 1) + ln[1 - psi] I(ind_i == 0)
+//
 // @keywords internal
 List dloglik_indolent_List(List indolents, List theta) {
     List result(indolents.size());
@@ -453,29 +521,41 @@ List dloglik_indolent_List(List indolents, List theta) {
     return result;
 }
 
-// To Be Named
+// Derivative of the log-likelihood w.r.t. the parameter of the
+//   model for the probability of a screen successfully detecting 
+//   pre-clinical status for a single censor type
 //
 // @param data_object List The data for a single censor type.
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param tau_HP NumericVector The current estimates for tau for
-//   the censor type under consideration
+// @param age_at_tau_hp_hat NumericVector The current estimated age at time of 
+//   healthy -> pre-clinical transition for all participants of the censor type 
+//   under consideration.
 //
-// @returns NumericVector The derivative of the log-likelihood
-//   wrt ... for each individual with the censor type under consideration.
+// @returns NumericVector Each element provides 
+//   n_successful_screens_i ln[beta] + n_failed_screens_i ln[1 - beta]
+//
 // @keywords internal
-NumericVector dloglik_screens_obj(List data_object, List theta, NumericVector tau_HP) {
+NumericVector dloglik_screens_obj(List data_object, 
+                                  List theta, 
+                                  NumericVector age_at_tau_hp_hat) {
     
+    // extracting vectorized age at screening data
     List ages_screen = data_object["ages_screen"];
     NumericVector age_screen = ages_screen["values"];
     IntegerVector starts = ages_screen["starts"];
     IntegerVector ends = ages_screen["ends"];
     IntegerVector lengths = ages_screen["lengths"];
     
+    // =1 if screen detected pre-clinical cancer
     IntegerVector n_screen_positive = data_object["n_screen_positive"];
     
-    NumericVector long_taus = repVec(tau_HP, lengths);
+    // current age at tau repeated to align with structure of the vectorized
+    // age data
+    NumericVector long_taus = repVec(age_at_tau_hp_hat, lengths);
     
+    // for each participant, count the number of screens that occurred after
+    // tau, but did not successfully identify pre-clinical status
     IntegerVector comp(age_screen.size(), 0);
     comp[age_screen > long_taus] = 1;
     IntegerVector tmp = cumsum(comp);
@@ -488,91 +568,109 @@ NumericVector dloglik_screens_obj(List data_object, List theta, NumericVector ta
         as<NumericVector>(n_screen_neg) * std::log(1.0 - beta);
 }
 
-// To Be Named
+// Derivative of the log-likelihood w.r.t. the parameter of the
+//   model for the probability of a screen successfully detecting 
+//   pre-clinical status for all cases
 //
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
-// @param tau_HPs List The current estimates for tau broken down according to
-//   the censor type. There are 3 elements. The 1st contains the tau estimates
-//   for censor_type = "screen" cases; the 2nd the tau estimates for
-//   censor_type = "censored" cases; and the 3rd the tau estimates for
-//   censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according 
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
 //
-// @returns List The list has 3 elements, each pertaining to a single
-//   censor type. Each element is a NumericVector containing the derivative of 
-//   the log-likelihood wrt ... for all individuals with the specific
-//   censor type. Element 1: screen; 2: censored; 3: clinical.
+// @returns List The list has 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+//   Each element is a NumericVector providing
+//     n_successful_screens_i ln[beta] + n_failed_screens_i ln[1 - beta]
+//
 // @keywords internal
-List dloglik_screens_List(List data_objects, List tau_HPs, List theta) {
+List dloglik_screens_List(List data_objects, List age_at_tau_hp_hats, List theta) {
     List result(data_objects.size());
     for (int i = 0; i < data_objects.size(); ++i) {
-        result[i] = dloglik_screens_obj(data_objects[i], theta, tau_HPs[i]);
+        result[i] = dloglik_screens_obj(data_objects[i], theta, age_at_tau_hp_hats[i]);
     }
     return result;  
 }
 
 
-// Derivative of the log-likelihood wrt sojourn time and indolence for all
-//   individuals
+// Derivative of the log-likelihood w.r.t. the sojourn time in the progressive 
+//   pre-clinical state and the indolence parameters for all individuals in
+//   of single censor type.
 //
 // @param data_object List The data for a single censor type.
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param tau_HP NumericVector The estimated tau for all individuals.
+// @param age_at_tau_hp_hat NumericVector The current estimated age at time of 
+//   healthy -> pre-clinical transition for all participants of the censor type 
+//   under consideration.
 // @param indolent IntegerVector =1 if indolent.
 //
-// @returns NumericVector The sum of the derivative of the log-likelihood 
-//   wrt sojourn time and wrt to indolence for each individual.
+// @returns NumericVector Each element providing
+//   Grp1 ln[psi]
+//   Grp2 {I(ind_i == 1) ln[psi] + 
+//         I(ind_i == 0) {ln[1 - psi] + ln[ F_P(tau_p_hat_i) ]}} +
+//   Grp3 ln[1 - psi] + ln[ f_P(tau_p_hat_i) ]
+//
 // @keywords internal
 NumericVector dloglik_PI_obj(List data_object, 
                              List theta, 
-                             NumericVector tau_HP,
+                             NumericVector age_at_tau_hp_hat,
                              IntegerVector indolent) {
+    // Grp1 {0} +
+    // ln[ F_P(tau_hp_hat_i) ] I(ind_i == 0) Grp2 +
+    // ln[ f_P(tau_pc_hat_i) ] I(ind_i == 0) Grp3
     NumericVector dlog_P = dloglik_sojourn_P_obj(data_object, theta,
-                                                 tau_HP, indolent);
+                                                 age_at_tau_hp_hat, indolent);
+    
+    // ln[psi] I(ind_i == 1) + ln[1 - psi] I(ind_i == 0)
     NumericVector dlog_I = dloglik_indolent_obj(theta, indolent);
+    
     return dlog_P + dlog_I;
 }
 
-// Sum of the derivative of the log-likelihood wrt sojourn time and indolence 
-//   over all individuals
+// Sum of the derivative of the log-likelihood w.r.t. the sojourn time in the 
+//   progressive pre-clinical state and the indolence parameters over all 
+//   individuals
 //
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param indolents List The current estimates for indolent broken down
-//   according to the censor type. There are 3 elements. The 1st contains the
-//   indolent estimates for censor_type = "screen" cases; the 2nd the data for
-//   censor_type = "censored" cases; and the 3rd the data for
-//   censor_type = "clinical" cases.
-// @param tau_HPs List The current estimates for tau broken down according to
-//   the censor type. There are 3 elements. The 1st contains the tau estimates
-//   for censor_type = "screen" cases; the 2nd the tau estimates for
-//   censor_type = "censored" cases; and the 3rd the tau estimates for
-//   censor_type = "clinical" cases.
+//   according to the censor type. There are 3 elements.
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
 //
-// @returns double The sum of the derivative of the log-likelihood 
-//   wrt sojourn time and wrt to indolence over all individuals.
+// @returns double 
+// sum i = 1, n
+//   Grp1 ln[psi]
+//   Grp2 {I(ind_i == 1) ln[psi] + 
+//         I(ind_i == 0) {ln[1 - psi] + ln[ F_P(tau_p_hat_i) ]}} +
+//   Grp3 ln[1 - psi] + ln[ f_P(tau_p_hat_i) ]
+//
 // @keywords internal
-double dloglik_PI_sum(List data_objects, List indolent, List tau_HPs, List theta) {
+double dloglik_PI_sum(List data_objects, 
+                      List indolent, 
+                      List age_at_tau_hp_hats, 
+                      List theta) {
     double result = 0.0;
     for (int i = 0; i < data_objects.size(); ++i) {
-        result += sum(dloglik_PI_obj(data_objects[i], theta, tau_HPs[i], indolent[i]));
+        result += sum(dloglik_PI_obj(data_objects[i], theta, 
+                                     age_at_tau_hp_hats[i], indolent[i]));
     }
     return result;
 }
 
 // Class to facilitate numerical integration
 // 
-// @param shapeH, scaleH, shapeP, scaleP Each double The parameters
-//   of the Weibull distributions.
+// @param shapeH, scaleH, shapeP, scaleP double The parameters of the Weibull
+//   distributions.
 // @param U double The upper boundary.
 //
 // Initialization sets shapeH, scaleH, shapeP, scaleP, and U for each integral.
@@ -589,8 +687,8 @@ public:
     WeibPDF(double shapeH_, double scaleH_, double shapeP_, double scaleP_, double U_) : 
     shapeH(shapeH_), scaleH(scaleH_), shapeP(shapeP_), scaleP(scaleP_), U(U_){}
     double operator()(const double& x) const {
-        NumericVector local_vec(1);
-        local_vec[0] = x;
+        NumericVector local_vec(1, x);
+        // f(x; shape_H, scale_H) F(U - x; shape_P, scale_P)
         return dweibull(local_vec, shapeH, scaleH, false)[0] * 
             pweibull(U - local_vec, shapeP, scaleP, false, false)[0];
     } 
@@ -625,11 +723,11 @@ double compute_integral(List theta, double L, double U) {
     return res;
 }
 
-// Compute integral at each ...
+// Compute integral at each age at first screening
 //
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param AFS NumericVector ...
+// @param AFS NumericVector Ages at first screening
 // @param t0 double The initial time.
 //
 // @returns An Rcpp::NumericVector of the integrals at each ...
@@ -639,11 +737,13 @@ NumericVector compute_cp_log(List theta, NumericVector AFS, double t0) {
     double L = 0.0;        // lower bound
     NumericVector U = AFS - t0; // upper bound
     
+    // F(S_0 - t_0; shape, scale)
     NumericVector prob_onset_after = pweibull(U, 
-                                              theta["shape_H"], theta["scale_H"], 
-                                                                     false, false);
+                                              theta["shape_H"], 
+                                              theta["scale_H"], 
+                                              false, false);
     
-    NumericVector integral(U.size());
+    NumericVector integral = no_init(U.size());
     for (int i = 0; i < U.size(); ++i) {    
         integral[i] = compute_integral(theta, L, U[i]);
     }
@@ -657,11 +757,12 @@ NumericVector compute_cp_log(List theta, NumericVector AFS, double t0) {
 //
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param AFS NumericVector ...
-// @param n_AFS NumericVector ...
+// @param AFS NumericVector Age at first screening
+// @param n_AFS NumericVector Frequency of AFS within the data.
 // @param t0 double The initial time.
 //
 // @returns double The sum of the integrals over all AFS.
+//
 // @keywords internal
 double dloglik_cp(List theta, 
                   NumericVector AFS, 
@@ -670,176 +771,214 @@ double dloglik_cp(List theta,
     return -sum(compute_cp_log(theta, AFS, t0) * n_AFS);
 }
 
-// Sum of the derivative of the log-likelihood wrt psi
+// Sum of the derivative of the log-likelihood w.r.t. psi, the probability of
+//   indolence
 // 
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param indolents List The current estimates for indolent broken down
-//   according to the censor type. There are 3 elements. The 1st contains the
-//   indolent estimates for censor_type = "screen" cases; the 2nd the data for
-//   censor_type = "censored" cases; and the 3rd the data for
-//   censor_type = "clinical" cases.
-// @param tau_HPs List The current estimates for tau broken down according to
-//   the censor type. There are 3 elements. The 1st contains the tau estimates
-//   for censor_type = "screen" cases; the 2nd the tau estimates for
-//   censor_type = "censored" cases; and the 3rd the tau estimates for
-//   censor_type = "clinical" cases.
+//   according to the censor type. There are 3 elements:
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according 
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param AFS NumericVector ...
-// @param n_AFS NumericVector ...
+// @param AFS NumericVector Age at first screening
+// @param n_AFS NumericVector Frequency of AFS within the data.
 // @param t0 double The initial time.
 //
-// @returns double The sum of the derivative wrt psi.
+// @returns double 
+// Unk +
+// sum i = 1, n
+//   Grp1 ln[psi]
+//   Grp2 {I(ind_i == 1) ln[psi] + 
+//         I(ind_i == 0) {ln[1 - psi] + ln[ F_P(tau_p_hat_i) ]}} +
+//   Grp3 ln[1 - psi] + ln[ f_P(tau_p_hat_i) ]
+//
 // @keywords internal
 double dloglik_psi(List data_objects, 
                    List indolent,
-                   List tau_HPs,
+                   List age_at_tau_hp_hats,
                    List theta, 
                    NumericVector AFS, 
                    NumericVector n_AFS, 
                    double t0) {
+    
+    // STH I need to better understand this cp term...
     double dlog_cp = dloglik_cp(theta, AFS, n_AFS, t0);
-    double dlog_PI = dloglik_PI_sum(data_objects, indolent, tau_HPs, theta);
+    
+    double dlog_PI = dloglik_PI_sum(data_objects, indolent, 
+                                    age_at_tau_hp_hats, theta);
+    
     return dlog_cp + dlog_PI;
 }
 
-// Derivative of the log-likelihood wrt tau for a single censor group
+// Derivative of the log-likelihood w.r.t. tau for a single censor type
 //
 // @param data_object List The data for a single censor type.
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param tau_HP NumericVector The estimated tau for all individuals.
+// @param age_at_tau_hp_hat NumericVector The current estimated age at time of 
+//   healthy -> pre-clinical transition for all participants of the censor type
+//   under consideration.
 // @param indolent IntegerVector =1 if indolent.
 // @param t0 double Initial time.
 //
-// @returns NumericVector The derivative for each case in the censor group
-//   under consideration.
+// @returns NumericVector Each element provides
+//   Grp1 ln[ F_h(T_i - t0) ] +
+//   Grp2 {ln[ f_h(tau_hp_hat_i) ] + I(ind_i == 0) ln[ F_P(tau_p_hat_i) ]} +
+//   Grp3 {ln[ f_h(tau_hp_hat_i) ] + I(ind_i == 0) ln[ f_P(tau_p_hat_i) ]} +
+//   n_successful_screens_i ln[beta] + n_failed_screens_i ln[1 - beta]
+//
 // @keywords internal
 NumericVector dloglik_tau_obj(List data_object,
                               List theta, 
-                              NumericVector tau_HP, 
+                              NumericVector age_at_tau_hp_hat, 
                               IntegerVector indolent, 
                               double t0) {
-    NumericVector dlog_H = dloglik_sojourn_H_obj(data_object, theta, tau_HP, t0);
-    NumericVector dlog_P = dloglik_sojourn_P_obj(data_object, theta, tau_HP, indolent);
-    NumericVector dlog_S = dloglik_screens_obj(data_object, theta, tau_HP);
+    
+    // Grp1 ln[ F_h(T_i - t0) ] + {Grp2 + Grp3} ln[ f_h(tau_hp_hat_i) ]
+    NumericVector dlog_H = dloglik_sojourn_H_obj(data_object, theta, 
+                                                 age_at_tau_hp_hat, t0);
+
+    // Grp1 {0}
+    // Grp2 I(ind_i == 0) ln[ F_P(tau_p_hat_i) ]
+    // Grp3 I(ind_i == 0) ln[ f_P(tau_p_hat_i) ]
+    NumericVector dlog_P = dloglik_sojourn_P_obj(data_object, theta, 
+                                                 age_at_tau_hp_hat, indolent);
+    
+    // n_successful_screens_i ln[beta] + n_failed_screens_i ln[1 - beta]
+    NumericVector dlog_S = dloglik_screens_obj(data_object, theta, 
+                                               age_at_tau_hp_hat);
+    
     return dlog_H + dlog_P + dlog_S;
 }
 
-// Derivative of the log-likelihood wrt tau for all censor groups
+// Derivative of the log-likelihood w.r.t. tau for all censor types
 //
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param indolents List The current estimates for indolent broken down
-//   according to the censor type. There are 3 elements. The 1st contains the
-//   indolent estimates for censor_type = "screen" cases; the 2nd the data for
-//   censor_type = "censored" cases; and the 3rd the data for
-//   censor_type = "clinical" cases.
-// @param tau_HPs List The current estimates for tau broken down according to
-//   the censor type. There are 3 elements. The 1st contains the tau estimates
-//   for censor_type = "screen" cases; the 2nd the tau estimates for
-//   censor_type = "censored" cases; and the 3rd the tau estimates for
-//   censor_type = "clinical" cases.
+//   according to the censor type. There are 3 elements:
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
 //
-// @returns List There are 3 elements. Each element holds the derivative
-//   for a single censor group.
+// @returns List There are 3 elements. 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+//   Each element is a NumericVector providing
+//   Grp1 ln[ F_h(T_i - t0) ] +
+//   Grp2 {ln[ f_h(tau_hp_hat_i) ] + I(ind_i == 0) ln[ F_P(tau_p_hat_i) ]} +
+//   Grp3 {ln[ f_h(tau_hp_hat_i) ] + I(ind_i == 0) ln[ f_P(tau_p_hat_i) ]} +
+//   n_successful_screens_i ln[beta] + n_failed_screens_i ln[1 - beta]
+//
+// @keywords internal
 List dloglik_tau_List(List data_objects, 
                       List indolents, 
-                      List tau_HPs, 
+                      List age_at_tau_hp_hats, 
                       List theta, 
                       double t0) {
     List result(data_objects.size());
     for (int i = 0; i < data_objects.size(); ++i) {
-        result[i] = dloglik_tau_obj(data_objects[i], theta, tau_HPs[i], 
+        result[i] = dloglik_tau_obj(data_objects[i], theta, age_at_tau_hp_hats[i], 
                                     indolents[i], t0);
     }
     return result;
 }
 
-// Sum of the derivative of the log-likelihood wrt psi
+// Sum of the derivative of the log-likelihood w.r.t. rate of tau_hp distribution
 // 
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
-// @param tau_HPs List The current estimates for tau broken down according to
-//   the censor type. There are 3 elements. The 1st contains the tau estimates
-//   for censor_type = "screen" cases; the 2nd the tau estimates for
-//   censor_type = "censored" cases; and the 3rd the tau estimates for
-//   censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according 
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param AFS NumericVector ...
-// @param n_AFS NumericVector ...
+// @param AFS NumericVector Age at first screening
+// @param n_AFS NumericVector Frequency of AFS within the data.
 // @param t0 double The initial time.
 //
-// @returns double The sum of the derivative wrt rate_H.
+// @returns double
+// Unk +
+// sum_i = 1, n
+//   Grp1 ln[ F_h(T_i - t0) ] + {Grp2 + Grp3} ln[ f_h(tau_hp_hat_i) ]
+//
 // @keywords internal
 double dloglik_rate_H(List data_objects, 
-                      List tau_HPs, 
+                      List age_at_tau_hp_hats, 
                       List theta, 
                       NumericVector AFS, 
                       NumericVector n_AFS, 
                       double t0) {
+    
+    // STH I need to better understand this cp term...
     double dlog_cp = dloglik_cp(theta, AFS, n_AFS, t0);
-    double dlog_H = dloglik_sojourn_H_sum(data_objects, tau_HPs, theta, t0);
+    
+    double dlog_H = dloglik_sojourn_H_sum(data_objects, age_at_tau_hp_hats, 
+                                          theta, t0);
+    
     return dlog_cp + dlog_H;
 }
 
 
-// Sum of the derivative of the log-likelihood wrt psi
+// Sum of the derivative of the log-likelihood w.r.t. rate of tau_p distribution
 // 
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param indolents List The current estimates for indolent broken down
-//   according to the censor type. There are 3 elements. The 1st contains the
-//   indolent estimates for censor_type = "screen" cases; the 2nd the data for
-//   censor_type = "censored" cases; and the 3rd the data for
-//   censor_type = "clinical" cases.
-// @param tau_HPs List The current estimates for tau broken down according to
-//   the censor type. There are 3 elements. The 1st contains the tau estimates
-//   for censor_type = "screen" cases; the 2nd the tau estimates for
-//   censor_type = "censored" cases; and the 3rd the tau estimates for
-//   censor_type = "clinical" cases.
+//   according to the censor type. There are 3 elements:
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param AFS NumericVector ...
-// @param n_AFS NumericVector ...
+// @param AFS NumericVector Age at first screening
+// @param n_AFS NumericVector Frequency of AFS within the data.
 // @param t0 double The initial time.
 //
-// @returns double The sum of the derivative wrt rate_P
+// @returns double
+//   Unk +
+//   Grp1 {0}
+//   Grp2 I(ind_i == 0) ln[ F_P(tau_p_hat_i) ]
+//   Grp3 I(ind_i == 0) ln[ f_P(tau_p_hat_i) ]
+//
 // @keywords internal
 double dloglik_rate_P(List data_objects, 
                       List indolents, 
-                      List tau_HPs,
+                      List age_at_tau_hp_hats,
                       List theta, 
                       NumericVector AFS, 
                       NumericVector n_AFS, 
                       double t0) {
+    // STH I need to better understand this cp term...
     double dlog_cp = dloglik_cp(theta, AFS, n_AFS, t0);
-    double dlog_P = dloglik_sojourn_P_sum(data_objects, indolents, tau_HPs, theta);
+    
+    double dlog_P = dloglik_sojourn_P_sum(data_objects, indolents, age_at_tau_hp_hats, theta);
+    
     return dlog_cp + dlog_P;
 }
 
 //
 // M-H rate_H ////////
 
-// Sample a new rate value
+// Sample a new rate value for the tau_hp distribution
 //
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param epsilong_rate_H double A small value shift.
+// @param epsilon_rate_H double A small value shift.
 //
 // @returns double The rate shifted by U(-eps, eps). Will never be negative.
+//
 // @keywords internal
 double rprop_rate_H(List theta, double epsilon_rate_H) {
     double rate_H = theta["rate_H"];
@@ -847,35 +986,34 @@ double rprop_rate_H(List theta, double epsilon_rate_H) {
     return std::fabs(rate_H);
 }
 
+// Metropolis-Hastings step for rate of tau_HP distribution
+//
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param indolents List The current estimates for indolent broken down
-//   according to the censor type. There are 3 elements. The 1st contains the
-//   indolent estimates for censor_type = "screen" cases; the 2nd the data for
-//   censor_type = "censored" cases; and the 3rd the data for
-//   censor_type = "clinical" cases.
+//   according to the censor type. There are 3 elements:
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param prior List The distribution parameters of the prior.
-// @param tau_HPs List The current estimates for tau broken down according to
-//   the censor type. There are 3 elements. The 1st contains the tau estimates
-//   for censor_type = "screen" cases; the 2nd the tau estimates for
-//   censor_type = "censored" cases; and the 3rd the tau estimates for
-//   censor_type = "clinical" cases.
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according 
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param AFS NumericVector ...
-// @param n_AFS NumericVector ...
+// @param AFS NumericVector A grouped vector providing all unique ages at first
+//   screening
+// @param n_AFS NumericVector  Frequency of AFS within the data.
 // @param epsilon_rate_H A small shift value. Must be > 0.
 // @param t0 double The initial time.
 //
 // @returns List There are 2 elements. Theta - the accepted new theta; and
 //   accept - TRUE if theta was updated; FALSE otherwise.
+//
 // @keywords internal
 List MH_rate_H(List data_objects,
                List indolents, 
                List prior, 
-               List tau_HPs,
+               List age_at_tau_hp_hats,
                List theta_cur, 
                NumericVector AFS, 
                NumericVector n_AFS, 
@@ -889,18 +1027,30 @@ List MH_rate_H(List data_objects,
     List theta_new = clone(theta_cur);
     theta_new = add_rate_H(theta_new, rate_H_new[0]);  // for dloglik_rate_H()
     
-    double dlog_lik_cur = dloglik_rate_H(data_objects, tau_HPs, theta_cur, 
+    // Unk +
+    // sum_i = 1, n
+    //   Grp1 ln[ F_h(T_i - t0) ] + {Grp2 + Grp3} ln[ f_h(tau_hp_hat_i) ]
+    // calculated with current rate_H value
+    double dlog_lik_cur = dloglik_rate_H(data_objects, age_at_tau_hp_hats, theta_cur, 
                                          AFS, n_AFS, t0);
-    double dlog_lik_new = dloglik_rate_H(data_objects, tau_HPs, theta_new, 
+    // Unk +
+    // sum_i = 1, n
+    //   Grp1 ln[ F_h(T_i - t0) ] + {Grp2 + Grp3} ln[ f_h(tau_hp_hat_i) ]
+    // calculated with new rate_H value
+    double dlog_lik_new = dloglik_rate_H(data_objects, age_at_tau_hp_hats, theta_new, 
                                          AFS, n_AFS, t0);
     
     double prior_rate = prior["rate_H"];
+    
+    // f_g(rate_H_new; shape_prior, scale_prior)
     double dlog_prior_new = dgamma(rate_H_new, prior["shape_H"], 
                                    1.0 / prior_rate, true)[0];
+    // f_g(rate_H_cur; shape_prior, scale_prior)
     double dlog_prior_cur = dgamma(rate_H_cur, prior["shape_H"], 
                                    1.0 / prior_rate, true)[0];
     
-    double MH_logratio = (dlog_lik_new + dlog_prior_new) - (dlog_lik_cur + dlog_prior_cur);
+    double MH_logratio = (dlog_lik_new + dlog_prior_new) - 
+        (dlog_lik_cur + dlog_prior_cur);
     
     if (runif(1)[0] < std::exp(MH_logratio)) {
         return List::create(Named("theta") = theta_new, Named("accept") = true);
@@ -912,13 +1062,14 @@ List MH_rate_H(List data_objects,
 //
 // M-H rate_P ////////
 
-// Sample a new rate value
+// Sample a new rate value for the tau_p distribution
 //
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param epsilong_rate_H double A small value shift.
+// @param epsilon_rate_P double A small value shift.
 //
 // @returns double The rate shifted by U(-eps, eps). Will never be negative.
+//
 // @keywords internal
 double rprop_rate_P(List theta, double epsilon_rate_P) {
     double rate_P = theta["rate_P"];
@@ -926,35 +1077,34 @@ double rprop_rate_P(List theta, double epsilon_rate_P) {
     return std::fabs(rate_P);
 }
 
+// Metropolis-Hastings step for rate of tau_P distribution
+//
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param indolents List The current estimates for indolent broken down
-//   according to the censor type. There are 3 elements. The 1st contains the
-//   indolent estimates for censor_type = "screen" cases; the 2nd the data for
-//   censor_type = "censored" cases; and the 3rd the data for
-//   censor_type = "clinical" cases.
+//   according to the censor type. There are 3 elements.  
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param prior List The distribution parameters of the prior.
-// @param tau_HPs List The current estimates for tau broken down according to
-//   the censor type. There are 3 elements. The 1st contains the tau estimates
-//   for censor_type = "screen" cases; the 2nd the tau estimates for
-//   censor_type = "censored" cases; and the 3rd the tau estimates for
-//   censor_type = "clinical" cases.
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according 
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param AFS NumericVector ...
-// @param n_AFS NumericVector ...
+// @param AFS NumericVector A grouped vector providing all unique ages at first
+//   screening
+// @param n_AFS NumericVector  Frequency of AFS within the data.
 // @param epsilon_rate_P A small shift value. Must be > 0.
 // @param t0 double The initial time.
 //
 // @returns List There are 2 elements. Theta - the accepted new theta; and
 //   accept - TRUE if theta was updated; FALSE otherwise.
+//
 // @keywords internal
 List MH_rate_P(List data_objects,
                List indolents, 
                List prior, 
-               List tau_HPs,
+               List age_at_tau_hp_hats,
                List theta_cur, 
                NumericVector AFS, 
                NumericVector n_AFS, 
@@ -968,18 +1118,32 @@ List MH_rate_P(List data_objects,
     theta_new = add_rate_P(theta_new, rate_P_new[0]);  // for dloglik_rate_P()
     
     // M-H acceptance ratio
-    double dlog_lik_cur = dloglik_rate_P(data_objects, indolents, tau_HPs, 
+    
+    // Unk +
+    // Grp1 {0}
+    // Grp2 I(ind_i == 0) ln[ F_P(tau_p_hat_i) ]
+    // Grp3 I(ind_i == 0) ln[ f_P(tau_p_hat_i) ]
+    // evaluated at current rate_P
+    double dlog_lik_cur = dloglik_rate_P(data_objects, indolents, age_at_tau_hp_hats, 
                                          theta_cur, AFS, n_AFS, t0);
-    double dlog_lik_new = dloglik_rate_P(data_objects, indolents, tau_HPs,
+    // Unk +
+    // Grp1 {0}
+    // Grp2 I(ind_i == 0) ln[ F_P(tau_p_hat_i) ]
+    // Grp3 I(ind_i == 0) ln[ f_P(tau_p_hat_i) ]
+    // evaluated at new rate_P
+    double dlog_lik_new = dloglik_rate_P(data_objects, indolents, age_at_tau_hp_hats,
                                          theta_new, AFS, n_AFS, t0);
     
     double prior_rate = prior["rate_P"];
+    // f_gamma(rate_P_new; shape_prior, scale_prior)
     double dlog_prior_new = dgamma(rate_P_new, prior["shape_P"], 
                                    1.0 / prior_rate, true)[0];
+    // f_gamma(rate_P_current; shape_prior, scale_prior)
     double dlog_prior_cur = dgamma(rate_P_cur, prior["shape_P"], 
                                    1.0 / prior_rate, true)[0];
     
-    double MH_logratio = (dlog_lik_new + dlog_prior_new) - (dlog_lik_cur + dlog_prior_cur);
+    double MH_logratio = (dlog_lik_new + dlog_prior_new) - 
+        (dlog_lik_cur + dlog_prior_cur);
     
     if (runif(1)[0] < std::exp(MH_logratio)) {
         return List::create(Named("theta") = theta_new, Named("accept") = true);
@@ -990,9 +1154,10 @@ List MH_rate_P(List data_objects,
 
 
 //
-// M-H tau_HP ////////
+// M-H age_at_tau_hp_hat ////////
 
-// Compute the probability of tau for a single censor type
+// Compute the probability of tau falling within the observed intervals for a 
+//   single censor type
 //
 // @param data_object List The data for a single censoring type.
 // @param theta List A named List object containing the parameters of the 
@@ -1000,14 +1165,23 @@ List MH_rate_P(List data_objects,
 // @param t0 A scalar double The initial time.
 //
 // @return List Elements include `values`, a NumericVector of all probabilities,
-//   `starts`, an IntegerVector containing the first element of `values pertaining
-//   to case i; `ends`, an IntegerVector containing the last element pertaining to
-//   individual i; and `lengths` the number of element in `values` pertaining to
-//   individual i.
+//   `starts`, an IntegerVector containing the first element of `values
+//   pertaining to case i; `ends`, an IntegerVector containing the last element
+//   pertaining to individual i; and `lengths` the number of element in `values`
+//   pertaining to individual i.
+//
+// @keywords internal
 List compute_prob_tau_obj(List data_object, List theta, double t0) {
     
+    // this is a bit of a misnomer. more of an event/censor age as this
+    // time is either the age at diagnosis of clinical cancer, age at 
+    // screen detection of pre-clinical cancers, or age at censoring
     NumericVector censor_time = data_object["censor_time"];
     
+    // extract vectorized observed interval data
+    // note that these interval boundaries are actually "age at time of"
+    // the interval is obtained by subtracting the lower age if no clinical
+    // diagnosis or by subtracting from the age at clinical diagnosis
     List endpoints = data_object["endpoints"];
     NumericVector ep = endpoints["values"];
     IntegerVector starts = endpoints["starts"];
@@ -1016,6 +1190,7 @@ List compute_prob_tau_obj(List data_object, List theta, double t0) {
     
     int censor_type = data_object["censor_type"];
     
+    // estimating the probability of each interval
     // The number of intervals is 1 less than the number of boundary points
     IntegerVector pt_lengths = lengths - 1;
     // The final index for each individual is 1 fewer than the lengths (0 indexing)
@@ -1045,12 +1220,14 @@ List compute_prob_tau_obj(List data_object, List theta, double t0) {
     NumericVector vec2 = ep[intervals + 1];
     
     if (censor_type != 3) {
+        // Pr(interval_k_lower < tau_hp <= interval_k_upper)
         prob_interval = pweibull_ab(vec1 - t0, vec2 - t0, 
                                     theta["shape_H"], theta["scale_H"]);
         
     } else {
-        // need to repeat censor time for each interval
+        // need to repeat censor time to match interval data structure
         NumericVector ct = repVec(censor_time, pt_lengths);
+        // Pr(interval_l_lower < tau_p <= interval_l_upper)
         prob_interval = pweibull_ab(ct - vec2,
                                     ct - vec1,
                                     theta["shape_P"], theta["scale_P"]);
@@ -1093,12 +1270,10 @@ List compute_prob_tau_obj(List data_object, List theta, double t0) {
                         Named("lengths") = pt_lengths);
 }
 
-// Compute probability of tau for all censoring types
+// Compute probability of tau for all censor types
 //
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
 // @param t0 A scalar double The initial time.
@@ -1106,7 +1281,8 @@ List compute_prob_tau_obj(List data_object, List theta, double t0) {
 // @returns List There are 3 elements. Each element is itself a List
 //   containing the probabilities of tau details for the specific
 //   censoring type.
-// exported to initialize these values are start of MC
+//
+// exported to initialize these values at start of MC
 // [[Rcpp::export]]
 List compute_prob_tau_List(List data_objects, List theta, double t0) {
     List result(data_objects.size());
@@ -1116,24 +1292,32 @@ List compute_prob_tau_List(List data_objects, List theta, double t0) {
     return result;
 }
 
-// Needs descriptive title
+// Sample current estimated probability of tau for new tau_hp
+//  for a single censor type
 //
 // @param data_object List The data for a single censoring type.
 // @param prob_tau List The probabilities of tau for all cases in the
 //   censoring type under consideration.
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param tau_HP NumericVector The current estimated tau for all
-//   individuals of the censor_type under consideration.
 // @param t0 A scalar double The initial time.
 //
 // @returns NumericVector The new estimated tau for each case in the 
 //   censoring type under consideration
-NumericVector rprop_tau_HP_obj(List data_object, List prob_tau, List theta, 
-                               double t0) {
+//
+// @keywords internal
+NumericVector rprop_age_at_tau_hp_hat_obj(List data_object, 
+                                       List prob_tau, 
+                                       List theta, 
+                                       double t0) {
     
+    // this is a bit of a misnomer. more of an event/censor age as this
+    // time is either the age at diagnosis of clinical cancer, age at 
+    // screen detection of pre-clinical cancers, or age at censoring
     NumericVector censor_time = data_object["censor_time"];
     
+    // extract vectorized interval information from data list
+    // note that these are "age at time of" boundaries
     List endpoints = data_object["endpoints"];
     NumericVector ep = endpoints["values"];
     IntegerVector ep_starts = endpoints["starts"];
@@ -1142,94 +1326,111 @@ NumericVector rprop_tau_HP_obj(List data_object, List prob_tau, List theta,
     
     int censor_type = data_object["censor_type"];
     
+    // extract vectorized probabilities of tau
     NumericVector pt = prob_tau["values"];
     IntegerVector pt_starts = prob_tau["starts"];
     IntegerVector pt_ends = prob_tau["ends"];
     IntegerVector pt_lengths = prob_tau["lengths"];
     
     // sample each case's interval
-    IntegerVector k_new(censor_time.size());
+    IntegerVector k_new = no_init(censor_time.size());
     for (int i = 0; i < pt_starts.size(); ++i) {
         int K = pt_lengths[i];
         NumericVector vec = pt[seq(pt_starts[i], pt_ends[i])];
         k_new[i] = sample(K, 1, false, vec)[0] - 1;
     }
     
-    NumericVector tau_HP_new;
+    NumericVector age_at_tau_hp_hat_new;
     
     NumericVector vec1 = ep[ep_starts + k_new];
     NumericVector vec2 = ep[ep_starts + k_new + 1];
     
-    // sample tau_HP in chosen interval
     if (censor_type == 1) {
+        // sample tau_hp from (interval_lower, interval_upper]
         NumericVector sojourn_H_new = rweibull_trunc(vec1 - t0, vec2 - t0,
                                                      theta["shape_H"], 
-                                                          theta["scale_H"]);
-        tau_HP_new = t0 + sojourn_H_new;
+                                                     theta["scale_H"]);
+        age_at_tau_hp_hat_new = t0 + sojourn_H_new;
     } else if(censor_type == 2) {
+        // sample tau_hp from (interval_lower, interval_upper]
+        // STH At this stage of the game I'm wondering why we don't sample
+        // tau_p for those that are not indolent?
         NumericVector sojourn_H_new = rweibull_trunc(vec1 - t0, vec2 - t0,
                                                      theta["shape_H"], 
-                                                          theta["scale_H"]);
-        tau_HP_new = t0 + sojourn_H_new;
-        tau_HP_new[k_new == (pt_lengths - 1)] = R_PosInf;
+                                                     theta["scale_H"]);
+        age_at_tau_hp_hat_new = t0 + sojourn_H_new;
+        
+        // if the estimated age at tau_hp > censor_time set tau = Inf
+        age_at_tau_hp_hat_new[k_new == (pt_lengths - 1)] = R_PosInf;
     } else {
+        // sample tau_p from (interval_lower, interval_upper]
         NumericVector sojourn_P_new = rweibull_trunc(censor_time - vec2, 
                                                      censor_time - vec1,
                                                      theta["shape_P"], 
-                                                          theta["scale_P"]);
-        tau_HP_new = censor_time - sojourn_P_new;
+                                                     theta["scale_P"]);
+        // age at tau_hp is age at clinical diagnosis - tau_p
+        age_at_tau_hp_hat_new = censor_time - sojourn_P_new;
     }
-    return tau_HP_new;
+    return age_at_tau_hp_hat_new;
 }
 
 
-// Needs descriptive title
+// Sample current estimated probability of tau for new tau_hp for all censor
+//  censor types
 //
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param prob_tau List The probabilities of tau broken down according to the
-//   censor type. There are 3 elements. The 1st contains the probabilities of
-//   tau for censor_type = "screen" cases; the 2nd the probabilities of tau for 
-//   censor_type = "censored" cases; and the 3rd the probabilities of tau for 
-//   censor_type = "clinical" cases.
+//   censor type. There are 3 elements. 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
 // @param t0 A scalar double The initial time.
 //
 // @returns List There are 3 elements. Each element is a NumericVector.
-// exported to initialize these values are start of MC
+//
+// exported to initialize these values at start of MC
 // [[Rcpp::export]]
-List rprop_tau_HP_List(List data_objects, List prob_tau, List theta, double t0) {
+List rprop_age_at_tau_hp_hat_List(List data_objects, 
+                                  List prob_tau, 
+                                  List theta, 
+                                  double t0) {
     List result(data_objects.size());
     for (int i = 0; i < data_objects.size(); ++i) {
-        result[i] = rprop_tau_HP_obj(data_objects[i], prob_tau[i], theta, t0);
+        result[i] = rprop_age_at_tau_hp_hat_obj(data_objects[i], prob_tau[i], 
+                                                theta, t0);
     }
     return result;
 }
 
-// Needs descriptive title
+// Contribution to the derivative of the log-likelihood from probability of tau
 //
 // @param data_object List The data for a single censoring type.
 // @param prob_tau List The probabilities of tau for all cases in the
 //   censoring type under consideration.
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
-// @param tau_HP NumericVector The current estimated tau for all
-//   individuals of the censor_type under consideration.
+// @param age_at_tau_hp_hat NumericVector The current estimated age at time of 
+//   healthy -> pre-clinical for all participants of the censor type under 
+//   consideration.
 // @param t0 A scalar double The initial time.
 //
 // @returns NumericVector 
+//
 // @keywords internal
-NumericVector dlog_prop_tau_HP_obj(List data_object,
-                                   List prob_tau,
-                                   List theta,
-                                   NumericVector tau_HP, 
-                                   double t0) {
+NumericVector dlog_prop_age_at_tau_hp_hat_obj(List data_object,
+                                              List prob_tau,
+                                              List theta,
+                                              NumericVector age_at_tau_hp_hat, 
+                                              double t0) {
     
+    // this is a bit of a misnomer. more of an event/censor age as this
+    // time is either the age at diagnosis of clinical cancer, age at 
+    // screen detection of pre-clinical cancer, or age at censoring
     NumericVector censor_time = data_object["censor_time"];
     
+    // extract vectorized interval boundary information
+    // note that this an "age at time of" vector
     List endpoints = data_object["endpoints"];
     NumericVector ep = endpoints["values"];
     IntegerVector ep_starts = endpoints["starts"];
@@ -1238,40 +1439,48 @@ NumericVector dlog_prop_tau_HP_obj(List data_object,
     
     int censor_type = data_object["censor_type"];
     
+    // extract vectorized probability of tau information
     NumericVector pt = prob_tau["values"];
     IntegerVector pt_starts = prob_tau["starts"];
     IntegerVector pt_ends = prob_tau["ends"];
     IntegerVector pt_lengths = prob_tau["lengths"];
     
-    // contribution of k_new
-    NumericVector tmp_tau = repVec(tau_HP, ep_lengths);
-    LogicalVector cmp = ep < tmp_tau;
+    // replicate age_at_tau_hp_hat_i to correlate with vectorized boundaries
+    NumericVector tmp_age_at_tau = repVec(age_at_tau_hp_hat, ep_lengths);
+    
+    // count the number of screens before transition for each patient
+    LogicalVector cmp = ep < tmp_age_at_tau;
     IntegerVector cmp_csum = cumsum(as<IntegerVector>(cmp));
     LogicalVector cmp_starts = cmp[ep_starts];
     IntegerVector icmp_starts = as<IntegerVector>(cmp_starts);
     
+    // k_new is the last screen before the current estimated transition time
     IntegerVector k_new = cmp_csum[ep_ends] - cmp_csum[ep_starts] + icmp_starts - 1;
-    
+    // extract the corresponding probability of tau
     NumericVector dlog_k = log(pt[pt_starts + k_new]);
     
     NumericVector vec1 = ep[ep_starts + k_new];
     NumericVector vec2 = ep[ep_starts + k_new + 1];
     
-    // contribution of tau_HP_i
     NumericVector dlog_tau;
     if (censor_type == 1) {
-        dlog_tau = dweibull_trunc(tau_HP - t0, 
+        // P(tau_hp_i == tau_hp_hat_i | interval_lower < tau_hp <= interval_upper)
+        dlog_tau = dweibull_trunc(age_at_tau_hp_hat - t0, 
                                   vec1 - t0, 
                                   vec2 - t0,
                                   theta["shape_H"], theta["scale_H"], true);
     } else if (censor_type == 2) {
-        dlog_tau = dweibull_trunc(tau_HP - t0, 
+        // P(tau_hp_i == tau_hp_hat_i | interval_lower < tau_hp <= interval_upper)
+        // STH again wondering why we don't use the tau_p for indolent = 0 cases
+        dlog_tau = dweibull_trunc(age_at_tau_hp_hat - t0, 
                                   vec1 - t0, 
                                   vec2 - t0,
                                   theta["shape_H"], theta["scale_H"], true);
+        // if estimated age at tau_hp > censor time, set to 0
         dlog_tau[(k_new + 1) == pt_lengths] = 0.0;
     } else {
-        dlog_tau = dweibull_trunc(censor_time - tau_HP, 
+        // P(tau_p_i == tau_p_hat_i | interval_lower < tau_p <= interval_upper)
+        dlog_tau = dweibull_trunc(censor_time - age_at_tau_hp_hat, 
                                   censor_time - vec2, 
                                   censor_time - vec1,
                                   theta["shape_P"], theta["scale_P"], true);
@@ -1279,33 +1488,33 @@ NumericVector dlog_prop_tau_HP_obj(List data_object,
     return dlog_k + dlog_tau;
 }
 
-// Needs descriptive title
+// Derivative of the log-likelihood from probability of tau for all cases
 //
 // @param data_objects List The data broken down according to the censor type.
-//   There are 3 elements. The 1st contains the data for censor_type = "screen" 
-//   cases; the 2nd the data for censor_type = "censored" cases; and the 3rd 
-//   the data for censor_type = "clinical" cases.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
 // @param prob_tau List The probabilities of tau broken down according to the
-//   censor type. There are 3 elements. The 1st contains the probabilities of
-//   tau for censor_type = "screen" cases; the 2nd the probabilities of tau for 
-//   censor_type = "censored" cases; and the 3rd the probabilities of tau for 
-//   censor_type = "clinical" cases.
-// @param tau_HPs List The current estimates for tau broken down according to
-//   the censor type. There are 3 elements. The 1st contains the tau estimates
-//   for censor_type = "screen" cases; the 2nd the tau estimates for
-//   censor_type = "censored" cases; and the 3rd the tau estimates for
-//   censor_type = "clinical" cases.
+//   censor type. There are 3 elements. 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped
+//   according to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
 // @param theta List A named List object containing the parameters of the 
 //   distributions. 
 // @param t0 A scalar double The initial time.
 //
 // @returns List There are 3 elements. Each element is a NumericVector.
-List dlog_prop_tau_HP_List(List data_objects, List prob_taus, List tau_HPs, 
-                           List theta, double t0) {
+//
+// @keywords internal
+List dlog_prop_age_at_tau_hp_hat_List(List data_objects, 
+                                      List prob_taus, 
+                                      List age_at_tau_hp_hats, 
+                                      List theta, double t0) {
     List result(data_objects.size());
     for (int i = 0; i < data_objects.size(); ++i) {
-        result[i] = dlog_prop_tau_HP_obj(data_objects[i], prob_taus[i], 
-                                         theta, tau_HPs[i], t0);
+        result[i] = dlog_prop_age_at_tau_hp_hat_obj(data_objects[i], prob_taus[i], 
+                                                    theta, age_at_tau_hp_hats[i], 
+                                                    t0);
     }
     return result;
 }
@@ -1313,31 +1522,82 @@ List dlog_prop_tau_HP_List(List data_objects, List prob_taus, List tau_HPs,
 //
 // indolent ////////
 
+// Probability of being indolent for each case of a single censor type given 
+//   current parameter and transition time estimates
+//
+// @param data_object List The data for a single censoring type.
+// @param theta List A named List object containing the parameters of the 
+//   distributions. 
+// @param age_at_tau_hp_hat NumericVector The current estimated age at time of 
+//   healthy -> pre-clinical transition for all participants of the censor type
+//   under consideration.
+// @param t0 A scalar double The initial time.
+//
+// @returns NumericVector 
+//
+// @keywords internal
 NumericVector compute_prob_indolent_obj(List data_object, List theta,
-                                        NumericVector tau_HP) {
+                                        NumericVector age_at_tau_hp_hat) {
     
-    IntegerVector ind(tau_HP.size());
+    IntegerVector ind(age_at_tau_hp_hat.size(), 0);
     
-    std::fill(ind.begin(), ind.end(), 0);
-    NumericVector L_0 = dloglik_PI_obj(data_object, theta, tau_HP, ind);
+    // Grp1 ln[psi]
+    // Grp2 {I(ind_i == 1) ln[psi] + 
+    //       I(ind_i == 0) {ln[1 - psi] + ln[ F_P(tau_p_hat_i) ]}} +
+    // Grp3 ln[1 - psi] + ln[ f_P(tau_p_hat_i) ]
+    // evaluated when all cases are set as non-indolent
+    NumericVector L_0 = dloglik_PI_obj(data_object, theta, age_at_tau_hp_hat, ind);
     L_0 = exp(L_0);
     
     std::fill(ind.begin(), ind.end(), 1);
-    NumericVector L_1 = dloglik_PI_obj(data_object, theta, tau_HP, ind);
+    // Grp1 ln[psi]
+    // Grp2 {I(ind_i == 1) ln[psi] + 
+    //       I(ind_i == 0) {ln[1 - psi] + ln[ F_P(tau_p_hat_i) ]}} +
+    // Grp3 ln[1 - psi] + ln[ f_P(tau_p_hat_i) ]
+    // evaluated when all cases are set as indolent
+    NumericVector L_1 = dloglik_PI_obj(data_object, theta, age_at_tau_hp_hat, ind);
     L_1 = exp(L_1);
     
     return L_1 / (L_0 + L_1);
 }
 
+// Probability of being indolent for all cases given current parameter and
+//  transition time estimates
+//
+// @param data_objects List The data broken down according to the censor type.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according
+//   according to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param theta List A named List object containing the parameters of the 
+//   distributions. 
+// @param t0 A scalar double The initial time.
+//
+// @returns List There are 3 elements. Each element is a NumericVector.
+//
+// exported to initialize these values at start of MC
 // [[Rcpp::export]]
-List compute_prob_indolent_List(List data_objects, List tau_HPs, List theta) {
+List compute_prob_indolent_List(List data_objects, List age_at_tau_hp_hats, List theta) {
     List result(data_objects.size());
     for (int i = 0; i < data_objects.size(); ++i) {
-        result[i] = compute_prob_indolent_obj(data_objects[i], theta, tau_HPs[i]);
+        result[i] = compute_prob_indolent_obj(data_objects[i], theta, age_at_tau_hp_hats[i]);
     }
     return result;
 }
 
+// Generate vector of indolence for all cases of a single censor type based on
+//   current estimated probability of indolence.
+//
+// Note: indolence is always 0 (false) for clinical cases
+//
+// @param data_object List The data for a single censoring type.
+// @param prob_indolent NumericVector the probability of each case being
+//   indolent.
+//
+// @returns IntegerVector Indicator of indolence.
+//
+// @keywords internal
 IntegerVector rprop_indolent_obj(List data_object, NumericVector prob_indolent) {
     
     int censor_type = data_object["censor_type"];
@@ -1346,17 +1606,30 @@ IntegerVector rprop_indolent_obj(List data_object, NumericVector prob_indolent) 
     IntegerVector indolent(n);
     
     if (censor_type == 3) {
+        // indolence is always false for those with a clinical diagnosis
         indolent.fill(0);
     } else {
+        // indolence is a random sample from binomial using the current
+        // estimated probability of indolence
         std::transform(prob_indolent.begin(), 
                        prob_indolent.end(), 
                        indolent.begin(), [=](double p){ return rbinom(1, 1, p)[0]; }); 
     }
     
     return indolent;
-    
 }
 
+// Generate vector of indolence for all cases.
+//
+// @param data_objects List The data broken down according to the censor type.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param prob_indolents List The current indolence probability broken down
+//   according to the censor type. There are 3 elements. 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+//
+// @returns List There are 3 elements. Each element is an IntegerVector.
+//
+// exported to initialize these values at start of MC
 // [[Rcpp::export]]
 List rprop_indolent_List(List data_objects, List prob_indolents) {
     List result(data_objects.size());
@@ -1367,6 +1640,20 @@ List rprop_indolent_List(List data_objects, List prob_indolents) {
 }
 
 
+// Case contributions to the log-likelihood for the probability of indolence
+//   for a single censor type
+//
+// @param data_object List The data for a single censoring type.
+// @param prob_indolent NumericVector the probability of each case being
+//   indolent.
+// @param indolent IntegerVector the current indolence indicator
+//
+// @returns NumericVector 
+//
+// {Grp1 + Grp2} {I(ind_i == 1) ln[ Pr(Ind == 1) ] + 
+//                I(ind_i == 0) ln[ 1 - Pr(Ind == 1) ]} + Grp3 {0}
+//
+// @keywords internal
 NumericVector dlog_prop_indolent_obj(List data_object, 
                                      NumericVector prob_indolent,
                                      IntegerVector indolent) {
@@ -1375,8 +1662,10 @@ NumericVector dlog_prop_indolent_obj(List data_object,
     
     NumericVector result = log(1.0 - prob_indolent);
     if (censor_type == 3) {
+        // dlog-likelihood is 0 for all clinical cases
         result.fill(0.0);
     } else {
+        // dlog-likelihood is log(1-p) for 0 cases; log(p) for 1 cases
         LogicalVector ind1 = indolent == 1;
         NumericVector prob1 = log(prob_indolent[ind1]);
         result[ind1] = prob1;
@@ -1385,16 +1674,46 @@ NumericVector dlog_prop_indolent_obj(List data_object,
     return result;
 }
 
-double dlog_prop_indolent_sum(List data_objects, List indolents, List prob_indolents) {
+// Log-likelihood for the probability of indolence for all cases
+//
+// @param data_objects List The data broken down according to the censor type.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param indolents List The current indolence indicator broken down
+//   according to the censor type. There are 3 elements.
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param prob_indolents List The current probability of indolence broken down
+//   according to the censor type. There are 3 elements.
+//   (1) "screen", (2) "censored", and (3) "clinical".
+//
+// @returns double
+// sum i = 1, n
+//   {Grp1 + Grp2} {I(ind_i == 1) ln[ Pr(Ind == 1) ] + 
+//                  I(ind_i == 0) ln[ 1 - Pr(Ind == 1) ]} + Grp3 {0}
+//
+// @keywords internal
+double dlog_prop_indolent_sum(List data_objects, 
+                              List indolents,
+                              List prob_indolents) {
     double result = 0.0;
     for (int i = 0; i < data_objects.size(); ++i) {
-        result += sum(dlog_prop_indolent_obj(data_objects[i], prob_indolents[i], indolents[i]));
+        result += sum(dlog_prop_indolent_obj(data_objects[i], prob_indolents[i], 
+                                             indolents[i]));
     }
     return result;
 }
 
 //
 // psi ////////
+
+// Random walk in psi space
+//
+// @param theta List A named List object containing the parameters of the 
+//   distributions. 
+// @param epsilon_psi A double. The maximum step size.
+//
+// @returns A double. The new psi value
+//
+// @keywords internal
 double rprop_psi(List theta, double epsilon_psi) {
     
     double psi = theta["psi"];
@@ -1414,62 +1733,108 @@ double rprop_psi(List theta, double epsilon_psi) {
 
 //
 // M-H tau ////////
-List MH_tau_obj(List data_object, List theta, NumericVector tau_HP, 
+
+// Metropolis-Hastings step for tau distributions for a single censor type
+//
+// @param data_object List The data for a single censoring type.
+// @param theta List A named List object containing the parameters of the 
+//   distributions. 
+// @param age_at_tau_hp_hat NumericVector The current estimated age at time of 
+//   healthy -> pre-clinical transition for all participants of the censor type 
+//   under consideration.
+// @param indolent IntegerVector Indicator of indolence.
+// @param t0 A scalar double The initial time.
+//
+// @returns List Element `$age_at_tau_hp_hat` is the possibly updated List of
+//   tau values and element `$accepted` is a LogicalVector, where true indicates
+//   that the corresponding element of `$age_at_tau_hp_hat` has been updated.
+//
+// @keywords internal
+List MH_tau_obj(List data_object, List theta, NumericVector age_at_tau_hp_hat, 
                 IntegerVector indolent, double t0) {
     
-    // propose new latent
+    // propose new latent variables age_at_tau_hp_hat/tau_CP
     List prob_tau = compute_prob_tau_obj(data_object, theta, t0);
     
-    NumericVector tau_HP_new = rprop_tau_HP_obj(data_object, prob_tau, theta, t0);
+    NumericVector age_at_tau_hp_hat_new = rprop_age_at_tau_hp_hat_obj(data_object, 
+                                                                      prob_tau, 
+                                                                      theta, t0);
     
     // M-H acceptance ratio
-    NumericVector dlog_prop_cur = dlog_prop_tau_HP_obj(data_object,
+    NumericVector dlog_prop_cur = dlog_prop_age_at_tau_hp_hat_obj(data_object,
                                                        prob_tau,
                                                        theta,
-                                                       tau_HP, 
+                                                       age_at_tau_hp_hat, 
                                                        t0);
     
-    NumericVector dlog_prop_new = dlog_prop_tau_HP_obj(data_object,
+    NumericVector dlog_prop_new = dlog_prop_age_at_tau_hp_hat_obj(data_object,
                                                        prob_tau,
                                                        theta,
-                                                       tau_HP_new,
+                                                       age_at_tau_hp_hat_new,
                                                        t0);
     
     NumericVector dlog_lik_cur = dloglik_tau_obj(data_object,
                                                  theta,
-                                                 tau_HP, 
+                                                 age_at_tau_hp_hat, 
                                                  indolent, 
                                                  t0);
     
     NumericVector dlog_lik_new = dloglik_tau_obj(data_object,
                                                  theta,
-                                                 tau_HP_new, 
+                                                 age_at_tau_hp_hat_new, 
                                                  indolent, 
                                                  t0);
     
-    NumericVector MH_logratio = dlog_lik_new - dlog_lik_cur + dlog_prop_cur - dlog_prop_new;
+    NumericVector MH_logratio = (dlog_lik_new - dlog_prop_new) - 
+        (dlog_lik_cur - dlog_prop_cur);
     
     LogicalVector test = runif(MH_logratio.size()) < exp(MH_logratio);
     
-    NumericVector accepted_tau = tau_HP;
-    accepted_tau[test] = tau_HP_new[test];
+    NumericVector accepted_tau = age_at_tau_hp_hat;
+    accepted_tau[test] = age_at_tau_hp_hat_new[test];
     
-    return List::create(Named("tau_HP") = accepted_tau,
+    return List::create(Named("age_at_tau_hp_hat") = accepted_tau,
                         Named("accept") = test);
     
 }
 
-List MH_tau_List(List data_objects, List indolents, List tau_HPs, List theta, double t0) {
+// Metropolis-Hastings step for rate of tau distribution for all cases
+//
+// @param data_objects List The data broken down according to the censor type.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param indolents List The current indolence indicator broken down
+//   according to the censor type. There are 3 elements:
+//   (1) "screen", (2) "censored", and (3) "clinical"
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according 
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param theta List A named List object containing the parameters of the 
+//   distributions. 
+// @param t0 A scalar double The initial time.
+//
+// @returns List Element `$age_at_tau_hp_hats` is the updated estimates for tau 
+//   broken down according to the censor type and element `$accept` is a list 
+//   broken down according to the censor type indicating if the corresponding
+//   elements of `$age_at_tau_hp_hats` were updated.
+//
+// @keywords internal
+List MH_tau_List(List data_objects, 
+                 List indolents, 
+                 List age_at_tau_hp_hats, 
+                 List theta, 
+                 double t0) {
     
     List result_tau(data_objects.size());
     List result_accept(data_objects.size());
     for (int i = 0; i < data_objects.size(); ++i) {
-        List res = MH_tau_obj(data_objects[i], theta, tau_HPs[i], indolents[i], t0);
-        result_tau[i] = res["tau_HP"];
+        List res = MH_tau_obj(data_objects[i], theta, age_at_tau_hp_hats[i], 
+                              indolents[i], t0);
+        result_tau[i] = res["age_at_tau_hp_hat"];
         result_accept[i] = res["accept"];
     }
     
-    return List::create(Named("tau_HPs") = result_tau,
+    return List::create(Named("age_at_tau_hp_hats") = result_tau,
                         Named("accept") = result_accept);  
 }
 
@@ -1477,14 +1842,29 @@ List MH_tau_List(List data_objects, List indolents, List tau_HPs, List theta, do
 //
 // M-H (psi, indolent) ////////
 
-List rprop_dlog_indolent_obj(List data_object, List theta, NumericVector tau_HP) {
+// Sample current probability of indolence distribution for each case of a 
+//   single censor type
+//
+// @param data_object List The data for a single censoring type.
+// @param theta List A named List object containing the parameters of the 
+//   distributions. 
+// @param age_at_tau_hp_hat NumericVector The current estimated age at time of 
+//   healthy -> pre-clinical transition for all participants of the censor type
+//   under consideration.
+//
+// @returns List Element `$indolent` is the updated indolence indicator and
+//   element `$dlog_prop` is the updated derivative evaluated at the updated
+//   indolence indicators.
+//
+// @keywords internal
+List rprop_dlog_indolent_obj(List data_object, List theta, NumericVector age_at_tau_hp_hat) {
     
     NumericVector prob_indolent_new = compute_prob_indolent_obj(data_object,
                                                                 theta,
-                                                                tau_HP);
-    
+                                                                age_at_tau_hp_hat);
+    // Generate new indolence vector
     IntegerVector indolent_new = rprop_indolent_obj(data_object, prob_indolent_new);
-    
+
     double dlog_prop_new = sum(dlog_prop_indolent_obj(data_object, 
                                                       prob_indolent_new, 
                                                       indolent_new));
@@ -1493,11 +1873,27 @@ List rprop_dlog_indolent_obj(List data_object, List theta, NumericVector tau_HP)
                         Named("dlog_prop") = dlog_prop_new);
 }
 
-List rprop_dlog_indolent_List(List data_objects, List tau_HPs, List theta) {
+// Sample current probability of indolence distribution for all cases
+//
+// @param data_objects List The data broken down according to the censor type.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param theta List A named List object containing the parameters of the 
+//   distributions. 
+//
+// @returns List Element `$indolent_new` is a List of the the updated 
+//   indolence indicator for each censor type and element `$dlog_prop_indolent_new`
+//   is the updated derivative for each censor type.
+//
+// @keywords internal
+List rprop_dlog_indolent_List(List data_objects, List age_at_tau_hp_hats, List theta) {
     List result_indolent(data_objects.size());
     double dlog_prop = 0.0;
     for (int i = 0; i < data_objects.size(); ++i) {
-        List res = rprop_dlog_indolent_obj(data_objects[i], theta, tau_HPs[i]);
+        List res = rprop_dlog_indolent_obj(data_objects[i], theta, age_at_tau_hp_hats[i]);
         result_indolent[i] = res["indolent"];
         double dlog = res["dlog_prop"];
         dlog_prop += dlog;
@@ -1507,11 +1903,34 @@ List rprop_dlog_indolent_List(List data_objects, List tau_HPs, List theta) {
                         Named("dlog_prop_indolent_new") = dlog_prop);  
 }
 
-// [[Rcpp::export]]
+// Metropolis-Hastings step for psi distribution
+//
+// @param data_objects List The data broken down according to the censor type.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param indolents List The current estimates for indolent broken down
+//   according to the censor type. There are 3 elements:
+//   (1) "screen", (2) "censored", and (3) "clinical"
+// @param prior List The distribution parameters of the prior.
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param theta_cur List A named List object containing the parameters of the 
+//   distributions. 
+// @param AFS NumericVector Age at first screening
+// @param n_AFS NumericVector Frequency of AFS within the data.
+// @param epsilon_psi A small shift value. Must be > 0.
+// @param t0 double The initial time.
+//
+// @returns List There are 3 elements. `$indolence` the possibly updated indolence
+//   indicator broken down by censor type; `$theta` the accepted new theta; and
+//   `$accept`, true if theta and indolence wer updated; FALSE otherwise.
+//
+// @keywords internal
 List MH_psi_indolent(List data_objects,
                      List indolents, 
                      List prior, 
-                     List tau_HPs,
+                     List age_at_tau_hp_hats,
                      List theta_cur, 
                      NumericVector AFS, 
                      NumericVector n_AFS,
@@ -1533,19 +1952,26 @@ List MH_psi_indolent(List data_objects,
     double dlog_prior_new = dbeta(psi_new, a_psi, b_psi, true)[0];
     
     // propose indolent and compute log proposal density
-    List out = rprop_dlog_indolent_List(data_objects, tau_HPs, theta_new);
+    List out = rprop_dlog_indolent_List(data_objects, age_at_tau_hp_hats, 
+                                        theta_new);
     List indolent_new = out["indolent_new"];
     
     // proposal density
     double dlog_prop_indolent_new = out["dlog_prop_indolent_new"];
-    List prob_indolent_cur = compute_prob_indolent_List(data_objects, tau_HPs, theta_cur);
+    List prob_indolent_cur = compute_prob_indolent_List(data_objects, 
+                                                        age_at_tau_hp_hats, 
+                                                        theta_cur);
     double dlog_prop_indolent_cur = dlog_prop_indolent_sum(data_objects,
                                                            indolents, 
                                                            prob_indolent_cur);
     
     // log likelihood
-    double dlog_lik_cur = dloglik_psi(data_objects, indolents, tau_HPs, theta_cur, AFS, n_AFS, t0);
-    double dlog_lik_new = dloglik_psi(data_objects, indolent_new, tau_HPs, theta_new, AFS, n_AFS, t0);
+    double dlog_lik_cur = dloglik_psi(data_objects, indolents, 
+                                      age_at_tau_hp_hats, 
+                                      theta_cur, AFS, n_AFS, t0);
+    double dlog_lik_new = dloglik_psi(data_objects, indolent_new, 
+                                      age_at_tau_hp_hats, 
+                                      theta_new, AFS, n_AFS, t0);
     
     // M-H acceptance ratio
     double MH_logratio = (dlog_lik_new + dlog_prior_new - dlog_prop_indolent_new) - 
@@ -1565,8 +1991,47 @@ List MH_psi_indolent(List data_objects,
 
 //
 // MCMC ////////
+
+// Need descriptive title
+//
+// @param data_objects List The data broken down according to the censor type.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param indolents List The current estimates for indolent broken down
+//   according to the censor type. There are 3 elements:
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param prior List The distribution parameters of the prior.
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param theta List A named List object containing the parameters of the 
+//   distributions. 
+// @param double epsilon_rate_H A positive scalar double specifying the maximum
+//   step size in the rate_H space.
+// @param double epsilon_rate_P A positive scalar double specifying the maximum
+//   step size in the rate_P space.
+// @param double epsilon_psi A positive scalar double specifying the maximum
+//   step size in the psi space.
+// @param t0 double The initial time.
+// @param M A positive scalar integer specifying the number of MC samples.
+// @param thin A positive scalar integer specifying the number of samples to
+//   be skipped between accepted samples.
+// @param M_thin A positive scalar integer specifying the total number of
+//   samples that will be accepted.
+// @param n_obs A positive scalar integer specifying the total number of
+//   participants. Note this should be equivalent to the sum of element
+//   `$n` in each element of `data_objects`.
+// @param n_screen_positive_total A positive scalar integer indicating the
+//   number of positive screens in the full data.
+// @param AFS NumericVector Age at first screening
+// @param n_AFS NumericVector Frequency of AFS within the data.
+//
+// @returns List 
+//
+// exported main function
 // [[Rcpp::export]]
-List MCMC_cpp(List data_objects, List indolents, List prior, List tau_HPs, List theta,
+List MCMC_cpp(List data_objects, List indolents, List prior, 
+              List age_at_tau_hp_hats, List theta,
               double epsilon_rate_H, double epsilon_rate_P, double epsilon_psi,
               double t0, int M, int thin, int M_thin, int n_obs,
               int n_screen_positive_total,
@@ -1574,53 +2039,54 @@ List MCMC_cpp(List data_objects, List indolents, List prior, List tau_HPs, List 
     
     NumericVector kRATE_H(M_thin), kRATE_P(M_thin), kBETA(M_thin), kPSI(M_thin);
     LogicalVector kACCEPT_PSI(M_thin), kACCEPT_RATE_H(M_thin), kACCEPT_RATE_P(M_thin);
-    NumericMatrix kTAU_HP(M_thin, n_obs);
+    NumericMatrix kage_at_tau_hp_hat(M_thin, n_obs);
     IntegerMatrix kINDOLENT(M_thin, n_obs);
     LogicalMatrix kACCEPT_LATENT(M_thin, n_obs);
     int ikept = -1;
     
     for (int m = 0; m < M; ++m) {
         // M-H rate_H
-        List out_rate_H = MH_rate_H(data_objects, indolents, prior, tau_HPs, theta, 
+        List out_rate_H = MH_rate_H(data_objects, indolents, prior, 
+                                    age_at_tau_hp_hats, theta, 
                                     AFS, n_AFS, epsilon_rate_H, t0);
         theta = out_rate_H["theta"];
         bool accept_rate_H = out_rate_H["accept"];
         
         // M-H rate_P
-        List out_rate_P = MH_rate_P(data_objects, indolents, prior, tau_HPs, theta, 
+        List out_rate_P = MH_rate_P(data_objects, indolents, prior, age_at_tau_hp_hats, theta, 
                                     AFS, n_AFS, epsilon_rate_P, t0);
         theta = out_rate_P["theta"];
         bool accept_rate_P = out_rate_P["accept"];
         
         // Gibbs beta
-        theta = gibbs_beta(data_objects, prior, tau_HPs, theta, n_screen_positive_total);
+        theta = gibbs_beta(data_objects, prior, age_at_tau_hp_hats, theta, n_screen_positive_total);
         
         // update (psi, indolent)
-        List out_psi_indolent = MH_psi_indolent(data_objects, indolents, prior, tau_HPs, theta,
+        List out_psi_indolent = MH_psi_indolent(data_objects, indolents, prior, age_at_tau_hp_hats, theta,
                                                 AFS, n_AFS, epsilon_psi, t0);
         indolents = out_psi_indolent["indolents"];
         theta = out_psi_indolent["theta"];
         bool accept_psi = out_psi_indolent["accept"];
         
-        // update tau_HP
-        List out_tau  = MH_tau_List(data_objects, indolents, tau_HPs, theta, t0);
-        tau_HPs = out_tau["tau_HPs"];
+        // update age_at_tau_hp_hat
+        List out_tau  = MH_tau_List(data_objects, indolents, age_at_tau_hp_hats, theta, t0);
+        age_at_tau_hp_hats = out_tau["age_at_tau_hp_hats"];
         List accept_latent = out_tau["accept"];
         // save output
         if (m % thin == 0) {
-            NumericVector tau_screen = tau_HPs[0];
+            NumericVector tau_screen = age_at_tau_hp_hats[0];
             IntegerVector indolent_screen = indolents[0];
             LogicalVector accept_latent_screen = accept_latent[0];
             
-            NumericVector tau_censored = tau_HPs[1];
+            NumericVector tau_censored = age_at_tau_hp_hats[1];
             IntegerVector indolent_censored = indolents[1];
             LogicalVector accept_latent_censored = accept_latent[1];
             
-            NumericVector tau_clinical = tau_HPs[2];
+            NumericVector tau_clinical = age_at_tau_hp_hats[2];
             IntegerVector indolent_clinical = indolents[2];
             LogicalVector accept_latent_clinical = accept_latent[2];
             
-            NumericVector tau_HP(tau_screen.size() + 
+            NumericVector age_at_tau_hp_hat(tau_screen.size() + 
                 tau_censored.size() + tau_clinical.size());
             IntegerVector indolent(indolent_screen.size() + 
                 indolent_censored.size() + indolent_clinical.size());
@@ -1631,9 +2097,9 @@ List MCMC_cpp(List data_objects, List indolents, List prior, List tau_HPs, List 
             int n_censored = tau_censored.size();
             int n_clinical = tau_clinical.size();
             
-            tau_HP[seq(0, n_screen-1)] = tau_screen;
-            tau_HP[seq(n_screen, n_screen + n_censored - 1)] = tau_censored;
-            tau_HP[seq(n_screen+ n_censored, n_screen + n_censored + n_clinical - 1)] = tau_clinical;
+            age_at_tau_hp_hat[seq(0, n_screen-1)] = tau_screen;
+            age_at_tau_hp_hat[seq(n_screen, n_screen + n_censored - 1)] = tau_censored;
+            age_at_tau_hp_hat[seq(n_screen+ n_censored, n_screen + n_censored + n_clinical - 1)] = tau_clinical;
             
             indolent[seq(0, n_screen-1)] = indolent_screen;
             indolent[seq(n_screen, n_screen + n_censored - 1)] = indolent_censored;
@@ -1648,7 +2114,7 @@ List MCMC_cpp(List data_objects, List indolents, List prior, List tau_HPs, List 
             kRATE_P  [ikept] = theta["rate_P"];
             kPSI     [ikept] = theta["psi"];
             kBETA    [ikept] = theta["beta"];
-            kTAU_HP  (ikept, _ ) = tau_HP;
+            kage_at_tau_hp_hat  (ikept, _ ) = age_at_tau_hp_hat;
             kINDOLENT(ikept, _ ) = indolent;
             kACCEPT_LATENT(ikept, _ ) = accept_latent;
             kACCEPT_PSI   [ikept] = accept_psi;
@@ -1670,7 +2136,7 @@ List MCMC_cpp(List data_objects, List indolents, List prior, List tau_HPs, List 
                                 Named("ACCEPT_LATENT") = kACCEPT_LATENT,
                                 Named("ACCEPT_PSI") = kACCEPT_PSI);
     return List::create(Named("THETA") = kTHETA, 
-                        Named("TAU_HP") = kTAU_HP, 
+                        Named("age_at_tau_hp_hat") = kage_at_tau_hp_hat, 
                         Named("INDOLENT") = kINDOLENT,
                         Named("ACCEPT") = kACCEPT, 
                         Named("epsilon") = epsilon);
