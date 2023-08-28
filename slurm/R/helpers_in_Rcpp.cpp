@@ -306,7 +306,7 @@ List gibbs_beta(List data_objects,
 //
 // Likelihood ////////
 
-// Derivative of the log-likelihood w.r.t. the sojourn time in the healthy state
+// The log-likelihood terms involving the sojourn time in the healthy state
 //   for all individuals of a specific censor type
 //
 // @param data_object List The data for a single censor type.
@@ -339,6 +339,7 @@ NumericVector dloglik_sojourn_H_obj(List data_object,
     // for participants that have an infinite age at time of transition, that is
     // so-called "healthy at censoring time",
     // F_h(T_i - t0, shape, scale); Pr(tau_hp <= T_i - t0)
+    // S_H(c_i - t_0; \lambda_H, \alpha_H) = 1 - F_h
     NumericVector vec1 = censor_time[isInfinite];
     NumericVector result_infinite = pweibull(vec1 - t0,
                                              theta["shape_H"],
@@ -359,7 +360,7 @@ NumericVector dloglik_sojourn_H_obj(List data_object,
     return result;
 }
 
-// Sum of the derivative of the log-likelihood w.r.t. the sojourn time in the
+// Sum of the log-likelihood terms involving the sojourn time in the
 //   healthy state over all individuals
 //
 // @param data_objects List The data broken down according to the censor type.
@@ -389,7 +390,7 @@ double dloglik_sojourn_H_sum(List data_objects,
     return result;
 }
 
-// Derivative of the log-likelihood w.r.t. the sojourn time in the progressive
+// The log-likelihood terms involving the sojourn time in the progressive
 //   pre-clinical state for all individuals of a specific censor type
 //
 // @param data_object List The data for a single censor type.
@@ -442,7 +443,7 @@ NumericVector dloglik_sojourn_P_obj(List data_object,
     return result;
 }
 
-// Sum of the derivative of the log-likelihood w.r.t. the sojourn time in the
+// Sum of the log-likelihood terms involving the sojourn time in the
 //   progressive pre-clinical state over all individuals
 //
 // @param data_objects List The data broken down according to the censor type.
@@ -477,7 +478,7 @@ double dloglik_sojourn_P_sum(List data_objects,
     return result;
 }
 
-// Derivative of the log-likelihood w.r.t. the parameter of the
+// The log-likelihood terms involving the parameter of the
 //   model for the probability of being indolent for a single censor type
 //
 // @param theta List A named List object containing the parameters of the 
@@ -499,7 +500,7 @@ NumericVector dloglik_indolent_obj(List theta, IntegerVector indolent) {
     return result;    
 }
 
-// Derivative of the log-likelihood w.r.t. the parameter of the
+// The log-likelihood terms involving the parameter of the
 //   model for the probability of being indolent for all individuals
 //
 // @param indolents List The current estimates for 0/1 indolent.
@@ -521,7 +522,7 @@ List dloglik_indolent_List(List indolents, List theta) {
     return result;
 }
 
-// Derivative of the log-likelihood w.r.t. the parameter of the
+// The log-likelihood terms involving the parameter of the
 //   model for the probability of a screen successfully detecting 
 //   pre-clinical status for a single censor type
 //
@@ -568,7 +569,7 @@ NumericVector dloglik_screens_obj(List data_object,
         as<NumericVector>(n_screen_neg) * std::log(1.0 - beta);
 }
 
-// Derivative of the log-likelihood w.r.t. the parameter of the
+// The log-likelihood terms involving the parameter of the
 //   model for the probability of a screen successfully detecting 
 //   pre-clinical status for all cases
 //
@@ -596,7 +597,7 @@ List dloglik_screens_List(List data_objects, List age_at_tau_hp_hats, List theta
 }
 
 
-// Derivative of the log-likelihood w.r.t. the sojourn time in the progressive 
+// The log-likelihood terms involving the sojourn time in the progressive 
 //   pre-clinical state and the indolence parameters for all individuals in
 //   of single censor type.
 //
@@ -631,7 +632,7 @@ NumericVector dloglik_PI_obj(List data_object,
     return dlog_P + dlog_I;
 }
 
-// Sum of the derivative of the log-likelihood w.r.t. the sojourn time in the 
+// Sum of the log-likelihood terms involving the sojourn time in the 
 //   progressive pre-clinical state and the indolence parameters over all 
 //   individuals
 //
@@ -771,7 +772,7 @@ double dloglik_cp(List theta,
     return -sum(compute_cp_log(theta, AFS, t0) * n_AFS);
 }
 
-// Sum of the derivative of the log-likelihood w.r.t. psi, the probability of
+// Sum of the log-likelihood terms involving psi, the probability of
 //   indolence
 // 
 // @param data_objects List The data broken down according to the censor type.
@@ -815,7 +816,7 @@ double dloglik_psi(List data_objects,
     return dlog_cp + dlog_PI;
 }
 
-// Derivative of the log-likelihood w.r.t. tau for a single censor type
+// The log-likelihood terms involving tau for a single censor type
 //
 // @param data_object List The data for a single censor type.
 // @param theta List A named List object containing the parameters of the 
@@ -856,7 +857,7 @@ NumericVector dloglik_tau_obj(List data_object,
     return dlog_H + dlog_P + dlog_S;
 }
 
-// Derivative of the log-likelihood w.r.t. tau for all censor types
+// The log-likelihood terms involving tau for all censor types
 //
 // @param data_objects List The data broken down according to the censor type.
 //   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
@@ -892,7 +893,7 @@ List dloglik_tau_List(List data_objects,
     return result;
 }
 
-// Sum of the derivative of the log-likelihood w.r.t. rate of tau_hp distribution
+// Sum of the log-likelihood involving the rate of tau_hp distribution
 // 
 // @param data_objects List The data broken down according to the censor type.
 //   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
@@ -929,7 +930,7 @@ double dloglik_rate_H(List data_objects,
 }
 
 
-// Sum of the derivative of the log-likelihood w.r.t. rate of tau_p distribution
+// The log-likelihood terms involving the rate of tau_p distribution
 // 
 // @param data_objects List The data broken down according to the censor type.
 //   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
@@ -1403,7 +1404,7 @@ List rprop_age_at_tau_hp_hat_List(List data_objects,
     return result;
 }
 
-// Contribution to the derivative of the log-likelihood from probability of tau
+// Contribution to the log-likelihood from probability of tau
 //
 // @param data_object List The data for a single censoring type.
 // @param prob_tau List The probabilities of tau for all cases in the
@@ -1488,7 +1489,7 @@ NumericVector dlog_prop_age_at_tau_hp_hat_obj(List data_object,
     return dlog_k + dlog_tau;
 }
 
-// Derivative of the log-likelihood from probability of tau for all cases
+// The log-likelihood terms involving probability of tau for all cases
 //
 // @param data_objects List The data broken down according to the censor type.
 //   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
@@ -1992,7 +1993,7 @@ List MH_psi_indolent(List data_objects,
 //
 // MCMC ////////
 
-// Need descriptive title
+// Full Markov Chain Monte Carlo Procedure
 //
 // @param data_objects List The data broken down according to the censor type.
 //   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
