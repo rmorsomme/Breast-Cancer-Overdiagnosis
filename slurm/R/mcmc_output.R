@@ -9,7 +9,7 @@
     
     M     <- 1e4
     
-    data_origin <- c("BCSC", "Swiss")[1]
+    data_origin <- c("BCSC", "Swiss", "simulation")[3]
     path_mcmc  <- paste0("output/MCMC/"   , data_origin)
     path_fig   <- paste0("output/figures/", data_origin)
     shape_H <- 2 # 1, 1.1, 1.5, 2 ,2.5, 3, 3.5
@@ -22,13 +22,13 @@
     
     sim_id     <- paste0(
         "M=", M,
-        "-AFS_low=", AFS_low,
-        "-AFS_upp=", AFS_upp,
+        #"-AFS_low=", AFS_low,
+        #"-AFS_upp=", AFS_upp,
         "-shape_H=", shape_H,
         "-shape_P=", shape_P,
-        "-t0=", t0,
-        "-mean_mean_P=", mean_mean_P,
-        "-precision_mean_P=", precision_mean_P,
+        #"-t0=", t0,
+        #"-mean_mean_P=", mean_mean_P,
+        #"-precision_mean_P=", precision_mean_P,
         ".RDATA"
     )
     file_draws <- paste(path_mcmc, sim_id, sep = "/")
@@ -99,11 +99,11 @@ THETA_true <- as_tibble(theta)
     g <- ggplot(THETA, aes(iteration, draws)) +
         geom_line()+
         facet_wrap(~parameter, scales = "free")
+    print(g)
     ggsave(
         paste(sim_id, "traceplot.jpg", sep = "_"),
         path = path_fig, width = 1.61803, height = 1, scale = 5
     )
-    g
 }
 
 {
@@ -112,23 +112,22 @@ THETA_true <- as_tibble(theta)
         facet_wrap(~parameter, scales = "free") +
         geom_vline(data = THETA_summary, mapping = aes(xintercept=q_low)) +
         geom_vline(data = THETA_summary, mapping = aes(xintercept=q_high))
+    print(g)
     ggsave(
         paste(sim_id, "histogram_raw.jpg", sep = "_"),
         path = path_fig, width = 1.61803, height = 1, scale = 5
     )
-    g
 }
 
 {
     g <- ggplot(THETA_acf, aes(lag, acf)) + 
         geom_col() + 
         facet_wrap(~parameter)
-    
+    print(g)
     ggsave(
         paste(sim_id, "acf.jpg", sep = "_"),
         path = path_fig, width = 1.61803, height = 1, scale = 5
     )
-    g
 }
 
 
@@ -148,10 +147,11 @@ THETA_true <- as_tibble(theta)
     lines(age, hazard_low)
     lines(age, hazard_mean)
     
+    
     # hazard at ages 47.5, 60 and 70
-    print(signif(shape_H * c(rate_H_low, rate_H_mean, rate_H_upp) * (47.5- t0)^(shape_H-1)), 3)
-    print(signif(shape_H * c(rate_H_low, rate_H_mean, rate_H_upp) * (60  - t0)^(shape_H-1)), 3)
-    print(signif(shape_H * c(rate_H_low, rate_H_mean, rate_H_upp) * (70  - t0)^(shape_H-1)), 3)
+    print(signif(shape_H * c(rate_H_low, rate_H_mean, rate_H_upp) * (47.5 - t0)^(shape_H-1)), 3)
+    print(signif(shape_H * c(rate_H_low, rate_H_mean, rate_H_upp) * (60   - t0)^(shape_H-1)), 3)
+    print(signif(shape_H * c(rate_H_low, rate_H_mean, rate_H_upp) * (70   - t0)^(shape_H-1)), 3)
 }
 
 #
@@ -179,84 +179,14 @@ out$THETA %>%
     GGally::ggpairs()
 
 
-#
-# Importance sampling ####
-THETA_tbl <- out$THETA %>% 
-    as_tibble() %>%
-    mutate(draw_id = 1:nrow(.))
-
-d_AFS <- expand_grid(
-    draw_id = 1:nrow(THETA_tbl),
-    AFS = unique(d_first_screen$first_screen)
-    ) %>%
-    filter(AFS %>% between(age_lower, age_upper)) %>%
-    left_join(d_first_screen, by = c("AFS" = "first_screen"))
-
-THETA_IS <- THETA_tbl %>% 
-    mutate(
-        shape_H = shape_H,
-        shape_P = shape_P,
-        SCALE_H = rate2scale(RATE_H, shape_H),
-        SCALE_P = rate2scale(RATE_P, shape_P)
-        ) %>%
-    left_join(d_AFS, by = "draw_id") %>%
-    mutate(
-        L = 0,
-        U = AFS - 39,
-        prob_onset_after  = pweibull(U, shape_H, SCALE_H, lower.tail = FALSE),
-        prob_onset_before = pweibull(U, shape_H, SCALE_H, lower.tail = TRUE ),
-        integral = list(L, U, RATE_H, RATE_P, shape_H, shape_P) %>% pmap_dbl(compute_integral),
-        w = PSI + (1-PSI)*(prob_onset_after + integral),
-        w_log = log(w),
-        w_log_sum = w_log * n
-    ) %>%
-    group_by(draw_id) %>%
-    summarize(w_log_tot = sum(w_log_sum)) %>%
-    ungroup() %>%
-    mutate(
-        w_tot = exp(w_log_tot),
-        w_tot = w_tot / sum(w_tot)
-    ) %>%
-    left_join(THETA_tbl, by = "draw_id") %>%
-    arrange(desc(w_tot))
-
-THETA_IS %>% 
-    ggplot(aes(x = w_tot)) +
-    geom_histogram()
-    
-
-THETA_IS %>%
-    ggplot(aes(draw_id, w_tot)) +
-    geom_line()
-
-{
-    THETA_IS %>%
-        mutate(
-            MEAN_H = RATE_H^(-1/theta_0$shape_H)*gamma(1+1/theta_0$shape_H),
-            MEAN_P = RATE_P^(-1/theta_0$shape_P)*gamma(1+1/theta_0$shape_P)
-        ) %>%
-        pivot_longer(cols = RATE_H:MEAN_P, names_to = "parameter", values_to = "draws") %>%
-        ggplot(aes(draws, weight = w_tot)) +
-        geom_histogram(aes(y = after_stat(density))) +
-        facet_wrap(~parameter, scales = "free") +
-        geom_vline(data = THETA_summary, mapping = aes(xintercept=q_low)) +
-        geom_vline(data = THETA_summary, mapping = aes(xintercept=q_high))
-    
-    ggsave(
-        paste(sim_id, "histogram_IS.jpg", sep = "_"),
-        path = path_fig, width = 1.61803, height = 1, scale = 5
-    )
-    }
-
-
 
 #
 # Latent data ####
 {
-    TAU_HP             <- out$TAU_HP
+    TAU_HP             <- out$age_at_tau_hp_hat
     TAU_HP_inf         <- is.infinite(TAU_HP)
-    ACCEPT_LATENT      <- out$ACCEPT_LATENT
-    ACCEPT_PSI         <- out$ACCEPT_PSI
+    ACCEPT_LATENT      <- out$ACCEPT$ACCEPT_LATENT
+    ACCEPT_PSI         <- out$ACCEPT$ACCEPT_PSI
     tau_inf_rate       <- colMeans(TAU_HP_inf)
     accept_latent_rate <- colMeans(ACCEPT_LATENT)
     
@@ -269,9 +199,9 @@ THETA_IS %>%
 group_id <- c("clinical", "screen", "censored")[1]
 
 {
-    ids <- which(d_obs_censor$censor_type==group_id)
-    accept_rate_group  <- accept_latent_rate[ids]
-    tau_inf_rate_group <- tau_inf_rate[ids]
+    id_group <- which(d_obs_censor$censor_type==group_id)
+    accept_rate_group  <- accept_latent_rate[id_group]
+    tau_inf_rate_group <- tau_inf_rate[id_group]
     
     summary(accept_rate_group) %>% print()
 }
@@ -282,39 +212,38 @@ if(group_id == "censored"){
     order(tau_inf_rate_group)[1:10] %>% print
 }
 
-if(group_id == "censored")  plot(d_obs_censor$censor_time[ids], tau_inf_rate[ids], xlab = "Censoring age (c)", ylab = "Probability of (c<tau)")
-if(group_id == "censored")  plot(d_obs_censor$censor_time[ids], tau_inf_rate[ids], xlab = "Censoring age (c)", ylab = "Probability of (c<tau)", xlim=c(40,70))
+if(group_id == "censored")  plot(d_obs_censor$censor_time[id_group], tau_inf_rate[id_group], xlab = "Censoring age (c)", ylab = "Probability of (c<tau)")
+if(group_id == "censored")  plot(d_obs_censor$censor_time[id_group], tau_inf_rate[id_group], xlab = "Censoring age (c)", ylab = "Probability of (c<tau)", xlim=c(40,50))
 
 boxplot(accept_rate_group)
-if(group_id == "screen")  boxplot(accept_rate_group ~ d_obs_censor$censor_time[ids])
-plot(d_obs_censor$censor_time[ids], accept_rate_group)
+if(group_id == "censored")  plot(tau_inf_rate_group, accept_rate_group)
+if(group_id == "screen")  boxplot(accept_rate_group ~ d_obs_censor$censor_time[id_group])
+plot(d_obs_censor$censor_time[id_group], accept_rate_group)
+plot(d_obs_censor$censor_time[id_group], accept_rate_group, xlim = c(42, 52))
 
 #
 ## individual ####
 {
     i_lowest_accept  <- order(accept_rate_group)[1]
     i_highest_accept <- order(accept_rate_group)[length(accept_rate_group)]
-    i <- ids[i_lowest_accept]
+    i <- id_group[i_lowest_accept]
+    accept_latent_rate[i]
     
-    #d_process[i,] %>% print()
     d_obs_censor[i,] %>% print()
-    filter(d_obs_screen, person_id == i) %>% print()
     
-    mcmc_tau     <- TAU_HP[,i]
-    mcmc_tau_inf <- TAU_HP_inf[,i]
-    #tau_true     <- d_process[i, "tau_HP"]
+    hist(TAU_HP[,i])
+    plot(TAU_HP[,i])
 }
 
-accept_latent_rate[i]
 
-if(group_id == "censored")  plot(mcmc_tau_inf, type="l")
+if(group_id == "censored")  plot(TAU_HP_inf[,i], type="l")
 
-plot(mcmc_tau[is.finite(mcmc_tau)], type="l"); abline(h=tau_true, col = "red")
+#plot(mcmc_tau[is.finite(mcmc_tau)], type="l"); abline(h=tau_true, col = "red")
 
 if(group_id == "censored"){
-    acf(as.numeric(mcmc_tau_inf))
+    acf(as.numeric(TAU_HP_inf[,i]))
 }else{
-    acf(mcmc_tau)
+    acf(TAU_HP[,i])
 }
 
 
@@ -323,4 +252,3 @@ if(group_id != "censored"){
     abline(v=tau_true, col = "red")
     abline(v=quantile(mcmc_tau, c(0.025, 0.975)), col = "grey")
 }
-
