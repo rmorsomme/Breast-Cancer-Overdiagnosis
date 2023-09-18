@@ -47,7 +47,7 @@ MH_tau_R <- function(tau_HP, indolent, censor_type, censor_time,
 #'   for use in C++, which indexes from 0.
 #' 
 #' @keywords internal
-compute_endpoints <- function(data.obj, t0) {
+compute_endpoints_cpp <- function(data.obj, t0) {
     
     res <- list()
     
@@ -95,7 +95,7 @@ compute_endpoints <- function(data.obj, t0) {
 
 # MCMC ####
 
-MCMC <- function(
+MCMC_cpp <- function(
         d_obs_screen, d_obs_censor,
         theta_0, prior, 
         epsilon_rate_H, epsilon_rate_P, epsilon_psi,
@@ -158,7 +158,7 @@ MCMC <- function(
                                        "ages_screen" = .defineAges(age_screen[clinical]),
                                        "n_screen_positive" = rep(0L, sum(clinical))))
     
-    endpoints <- compute_endpoints(data.obj, t0)
+    endpoints <- compute_endpoints_cpp(data.obj, t0)
     
     # add endpoint information to data.obj
     data.obj$screen$endpoints <- endpoints$screen
@@ -183,7 +183,7 @@ MCMC <- function(
     
     
     tic()
-    out = MCMC_cpp(data_objects = data.obj, 
+    out = MCMC_cpp_internal(data_objects = data.obj, 
              indolents = indolents, 
              prior = prior, 
              age_at_tau_hp_hats = age_at_tau_hp_hats, 

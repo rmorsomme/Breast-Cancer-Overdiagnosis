@@ -104,7 +104,7 @@ NumericVector pweibull_ab(NumericVector a,
         pweibull(a, shape, scale, true, false);
 }
 
-// A bounded random sample from the Weibull distribution.
+// A random sample from the truncated Weibull distribution.
 //
 // Note: Upper and lower limits are taken in pairs from inputs `a` and `b`; 
 //   i.e., element i of `a` is the lower bound, element i of `b` is the upper
@@ -140,7 +140,6 @@ NumericVector rweibull_trunc(NumericVector a,
 }
 
 // Truncated Weibull Probability Density
-// STH I was expecting an indicator function for values outside of the range
 //
 // @param x NumericVector A vector of one or more quantiles at which the
 //   density is evaluated.
@@ -2031,7 +2030,7 @@ List MH_psi_indolent(List data_objects,
 //
 // exported main function
 // [[Rcpp::export]]
-List MCMC_cpp(List data_objects, List indolents, List prior, 
+List MCMC_cpp_internal(List data_objects, List indolents, List prior, 
               List age_at_tau_hp_hats, List theta,
               double epsilon_rate_H, double epsilon_rate_P, double epsilon_psi,
               double t0, int M, int thin, int M_thin, int n_obs,
