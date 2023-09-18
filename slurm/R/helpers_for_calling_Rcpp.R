@@ -100,8 +100,8 @@ MCMC <- function(
         theta_0, prior, 
         epsilon_rate_H, epsilon_rate_P, epsilon_psi,
         t0,
-        M = 100, thin = 1,
-        n_cpu = NULL, verbose = FALSE) {
+        M = 100, thin = 1
+        ) {
     
     M_thin <- M / thin
     
@@ -138,7 +138,7 @@ MCMC <- function(
              "lengths" = lengths(age.screen))
     }
     
-    screens <- d_obs_censor$censor_type == "screen"
+    screens  <- d_obs_censor$censor_type == "screen"
     censored <- d_obs_censor$censor_type == "censored"
     clinical <- d_obs_censor$censor_type == "clinical"
  
@@ -175,15 +175,18 @@ MCMC <- function(
     n_AFS <- d_AFS$n 
     
     # initialization of latent variables -- these functions are defined in C++
+    
     prob_tau_0 <- compute_prob_tau_List(data.obj, theta, t0)
-    tau_HPs <- rprop_tau_HP_List(data.obj, prob_tau_0, theta, t0)
-    prob_indolent_0 <- compute_prob_indolent_List(data.obj, tau_HPs, theta)
+    age_at_tau_hp_hats <- rprop_age_at_tau_hp_hat_List(data.obj, prob_tau_0, theta, t0)
+    prob_indolent_0 <- compute_prob_indolent_List(data.obj, age_at_tau_hp_hats, theta)
     indolents <- rprop_indolent_List(data.obj, prob_indolent_0)
     
-    MCMC_cpp(data_objects = data.obj, 
+    
+    tic()
+    out = MCMC_cpp(data_objects = data.obj, 
              indolents = indolents, 
              prior = prior, 
-             tau_HPs = tau_HPs, 
+             age_at_tau_hp_hats = age_at_tau_hp_hats, 
              theta = theta, 
              epsilon_rate_H = epsilon_rate_H, 
              epsilon_rate_P = epsilon_rate_P, 
@@ -196,4 +199,15 @@ MCMC <- function(
              n_screen_positive_total = n_screen_positive_total, 
              AFS = AFS, 
              n_AFS = n_AFS)
+    runtime = toc()
+    
+    out[["runtime"]] = runtime$toc - runtime$tic
+    
+    # re-order the columns of output, so they match the order of the input
+    order_cols = c(which(screens), which(censored), which(clinical))
+    out[["age_at_tau_hp_hat"]][,order_cols] = out[["age_at_tau_hp_hat"]]
+    out[["INDOLENT"]][,order_cols] = out[["INDOLENT"]]
+    out[["ACCEPT"]][["ACCEPT_LATENT"]][,order_cols] = out[["ACCEPT"]][["ACCEPT_LATENT"]]
+    
+    return(out)
 }
