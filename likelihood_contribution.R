@@ -72,4 +72,4 @@ tibble(tau_HP = taus) %>%
   pivot_longer(cols = posterior:proposal, names_to = "Distribution", values_to = "Density") %>%
   ggplot(aes(tau_HP, Density, col = Distribution)) +
   geom_line() +
-  labs(x=expression(tau[i]^HP), y= "density") #expression( pi(tau[866]^HP  ~ "|" ~  theta) )
+  labs(x=expression(tau[i]^HP), y = "density") #expression( pi(tau[866]^HP  ~ "|" ~  theta) )
