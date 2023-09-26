@@ -1,3 +1,4 @@
+
 save_figures <- function(name, path = NULL, scale){
     
     # save .jpg (for presentation)
@@ -15,19 +16,35 @@ save_figures <- function(name, path = NULL, scale){
 }
 
 
-proposal_vs_target = function(censor_type, age_screen, theta, t0, path_figure = "output/figures/misc/", scale = 5) {
+proposal_vs_target = function(
+        censor_type, age_screen, theta, t0,
+        include_legend = FALSE,
+        path_figure = "slurm/output/figures/misc/", scale = 5
+        ) {
     
-    screen_detected = rep(0, length(age_screen))
-    censor_time = max(age_screen)+1.5
-    n_screen_positive = sum(screen_detected)
-    
-    endpoints = compute_endpoints_i(age_screen, censor_type, censor_time, t0)
-    prob_tau = compute_prob_tau_i(censor_type, censor_time, endpoints, theta, t0)
+    # prepare data
+    if(censor_type == "censored") {
+        screen_detected = rep(0, length(age_screen))
+        censor_time = max(age_screen)+1.5
+        n_screen_positive = sum(screen_detected)
+        
+        endpoints = compute_endpoints_i(age_screen, censor_type, censor_time, t0)
+        prob_tau = compute_prob_tau_i(censor_type, censor_time, endpoints, theta, t0)
+    }else if(censor_type == "screen") {
+        screen_detected = c(rep(0, length(age_screen) - 1), 1)
+        censor_time = max(age_screen)
+        n_screen_positive = sum(screen_detected)
+        
+        endpoints = compute_endpoints_i(age_screen, censor_type, censor_time, t0)
+        prob_tau = compute_prob_tau_i(censor_type, censor_time, endpoints, theta, t0)
+    }
+
+    labels = c('Proposal', expression(paste('Target (', I[i], ' = 0)')), expression(paste('Target (', I[i], ' = 1)')))
     
     # line plot
     stepsize = 0.01
     g = tibble(
-        taus=seq(censor_time-17.5, censor_time, by = stepsize),
+        taus=seq(censor_time-17.5, censor_time-stepsize, by = stepsize),
         ll_indolent0=taus%>%map_dbl(dlog_likelihood_i, indolent_i=0, censor_type, censor_time, age_screen, n_screen_positive, theta, t0),
         ll_indolent1=taus%>%map_dbl(dlog_likelihood_i, indolent_i=1, censor_type, censor_time, age_screen, n_screen_positive, theta, t0),
         log_prop=taus%>%map_dbl(dlog_prop_tau_HP_i, censor_type, censor_time, endpoints, prob_tau, theta, t0),
@@ -37,9 +54,12 @@ proposal_vs_target = function(censor_type, age_screen, theta, t0, path_figure = 
     ) %>% 
         pivot_longer(cols = Target0:Proposal, names_to = "Distribution", values_to = "Density") %>%
         ggplot(aes(taus, Density, linetype=Distribution)) + 
-        geom_line()+
-        labs(x = "P transition time", y = "Density") +
-        scale_linetype_discrete(labels=c('Proposal', 'Target (Indolent = 0)', 'Target (Indolent = 1)'))
+        geom_line(alpha=0.5)+
+        labs(x = expression(t[i]^HP), y = "Density") +
+        scale_linetype_discrete(labels=labels) +
+        theme(legend.text.align = 0)
+    
+    if(!include_legend)  g = g + theme(legend.position="none")
     
     print(g)
     
@@ -48,20 +68,5 @@ proposal_vs_target = function(censor_type, age_screen, theta, t0, path_figure = 
     # save figure
     save_figures(name, path_figure, scale)
 }
-
-source("R/helpers.R")
-theme_set(theme_bw())
-
-theta <- list(
-    rate_H = 1/580, shape_H = 2,
-    rate_P = 1/6  , shape_P = 1,
-    beta   = 0.85, psi = 0.1
-) %>% update_scales()
-t0=30
-
-age_screen = 40+5*(1:5)
-censor_type = "censored"
-proposal_vs_target(censor_type, age_screen, theta, t0)
-
 
 
