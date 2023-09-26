@@ -1,6 +1,27 @@
 #
-# Setup ####
+# Helper functions ####
+draw_sojourn_H <- function(theta){
+  rweibull(1, shape = theta$shape_H, scale = theta$scale_H)
+}
 
+draw_sojourn_P <- function(theta){
+  rweibull(1, shape = theta$shape_P, scale = theta$scale_P)
+}
+
+compute_compartment <- function(t, tau_HP){
+  case_when(
+    t < tau_HP ~ "H",
+    TRUE       ~ "P"
+  )
+}
+
+screen_result <- function(compartment, theta) {
+  if(compartment == "H")  return(FALSE)  
+  if(compartment == "P")  return(rbernoulli(1, p = theta$beta))
+}
+
+#
+# Setup ####
 {
     d_process <- tibble(
         person_id = numeric(n),
@@ -21,7 +42,6 @@
 
 #
 ## Biological process ####
-
 for(i in 1 : n){ # person i
     
     sojourn_H <- draw_sojourn_H(theta)
@@ -33,12 +53,10 @@ for(i in 1 : n){ # person i
     d_process[i, ] <- tibble(
         i, sojourn_H, tau_HP, indolent, sojourn_P, tau_PC
         )
-
 }
 
 #
 ## Observation process ####
-
 for(i in 1 : n){  print(i) # person i
   
     AFS       <- sample(40:80, 1, prob = exp(-(40:80)/5)) # age at first screen
@@ -83,9 +101,7 @@ for(i in 1 : n){  print(i) # person i
               add_row(person_id = i, censor_type  = "censored", censor_time = age_death, AFS = AFS)
           break
           }
-      
     }
-  
 }
 
 count(d_obs_censor, censor_type) %>% print()

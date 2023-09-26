@@ -57,29 +57,6 @@ add_psi <- function(theta, psi){
 }
 
 #
-# Biological process ####
-
-draw_sojourn_H <- function(theta){
-    rweibull(1, shape = theta$shape_H, scale = theta$scale_H)
-}
-
-draw_sojourn_P <- function(theta){
-    rweibull(1, shape = theta$shape_P, scale = theta$scale_P)
-}
-
-compute_compartment <- function(t, tau_HP){
-    case_when(
-        t < tau_HP ~ "H",
-        TRUE       ~ "P"
-    )
-}
-
-screen_result <- function(compartment, theta) {
-    if(compartment == "H")  return(FALSE)  
-    if(compartment == "P")  return(rbernoulli(1, p = theta$beta))
-}
-
-#
 # Gibbs theta ####
 
 gibbs_rate_H <- function(tau_HP, theta, prior, censor_time, t0){ # gamma prior and weibull likelihood conjugacy
