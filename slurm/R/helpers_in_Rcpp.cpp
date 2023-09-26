@@ -57,7 +57,8 @@ NumericVector repVec(const NumericVector& x, const IntegerVector& times) {
 //
 // @returns double The scale parameter of the Weibull distribution. Will be > 0.
 //
-// @keywords internal
+// exported auxiliary function
+// [[Rcpp::export]]
 double rate2scale(double rate, double shape) {
     NumericVector temp(1, rate);
     return Rcpp::pow(temp, -1.0 / shape)[0];
@@ -71,7 +72,8 @@ double rate2scale(double rate, double shape) {
 // @returns List The input `theta` with updated elements `$scale_H`
 //   and `$scale_P`.
 //
-// @keywords internal
+// exported auxiliary function
+// [[Rcpp::export]]
 List update_scales(List theta) {
     theta["scale_H"] = rate2scale(theta["rate_H"], theta["shape_H"]);
     theta["scale_P"] = rate2scale(theta["rate_P"], theta["shape_P"]);
