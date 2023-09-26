@@ -41,46 +41,44 @@
 }
 
 {
-#
-# Run time ####
-(runtime <- out$runtime) / 60 # minutes
-(runtime <- out$runtime) / 3600 # hours
+    #
+    # Run time ####
+    runtime <- out$runtime
+    print(runtime / 60) # minutes
+
+    #
+    # Acceptnace rate ####
+    print(mean(out$ACCEPT$ACCEPT_RATE_H))
+    print(mean(out$ACCEPT$ACCEPT_RATE_P))
+    print(mean(out$ACCEPT$ACCEPT_PSI   ))
+
+    #
+    # Parameters ####
+    THETA <- out$THETA %>%
+        as_tibble() %>%
+        mutate(
+            MEAN_H = RATE_H^(-1/theta_0$shape_H)*gamma(1+1/theta_0$shape_H),
+            MEAN_P = RATE_P^(-1/theta_0$shape_P)*gamma(1+1/theta_0$shape_P),
+            iteration = 1:nrow(.)
+        ) %>%
+        #filter(iteration > 100) %>% # remove burnin
+        pivot_longer(cols = -iteration, names_to = "parameter", values_to = "draws")
 
 
-#
-# Acceptnace rate ####
-mean(out$ACCEPT$ACCEPT_RATE_H)
-mean(out$ACCEPT$ACCEPT_RATE_P)
-mean(out$ACCEPT$ACCEPT_PSI   )
-
-
-
-#
-# Parameters ####
-
-THETA <- out$THETA %>%
-    as_tibble() %>%
-    mutate(
-        MEAN_H = RATE_H^(-1/theta_0$shape_H)*gamma(1+1/theta_0$shape_H),
-        MEAN_P = RATE_P^(-1/theta_0$shape_P)*gamma(1+1/theta_0$shape_P),
-        iteration = 1:nrow(.)
-    ) %>%
-    #filter(iteration > 100) %>% # remove burnin
-    pivot_longer(cols = -iteration, names_to = "parameter", values_to = "draws")
-
-
-{
-    g <- ggplot(THETA, aes(iteration, draws)) +
-        geom_line()+
-        facet_wrap(~parameter, scales = "free") +
-        labs(title=paste0("AFS between ", AFS_low, " and ", AFS_upp))
-    print(g)
-    ggsave(
-        paste(sim_id, "traceplot.jpg", sep = "_"),
-        path = path_fig, width = 1.61803, height = 1, scale = 5
-    )
+    {
+        # traceplots
+        g <- ggplot(THETA, aes(iteration, draws)) +
+            geom_line()+
+            facet_wrap(~parameter, scales = "free") +
+            labs(title=paste0("AFS between ", AFS_low, " and ", AFS_upp))
+        print(g)
+        ggsave(
+            paste(sim_id, "traceplot.jpg", sep = "_"),
+            path = path_fig, width = 1.61803, height = 1, scale = 5
+        )
+    }
 }
-}
+
 THETA_summary <- THETA %>%
     group_by(parameter) %>%
     summarize(
@@ -91,6 +89,20 @@ THETA_summary <- THETA %>%
         ESS_sec = ESS / out$runtime
     ) %>%
     print()
+
+{
+    # histograms
+    g <- ggplot(THETA, aes(draws)) +
+        geom_histogram(aes(y = after_stat(density))) +
+        facet_wrap(~parameter, scales = "free") +
+        geom_vline(data = THETA_summary, mapping = aes(xintercept=q_low)) +
+        geom_vline(data = THETA_summary, mapping = aes(xintercept=q_high))
+    print(g)
+    ggsave(
+        paste(sim_id, "histogram_raw.jpg", sep = "_"),
+        path = path_fig, width = 1.61803, height = 1, scale = 5
+    )
+    }
 
 my_acf <- function(draws){
     tmp <- acf(draws, plot = FALSE)
@@ -107,18 +119,7 @@ THETA_acf <- THETA %>%
 
 THETA_true <- as_tibble(theta)
 
-{
-    g <- ggplot(THETA, aes(draws)) +
-        geom_histogram(aes(y = after_stat(density))) +
-        facet_wrap(~parameter, scales = "free") +
-        geom_vline(data = THETA_summary, mapping = aes(xintercept=q_low)) +
-        geom_vline(data = THETA_summary, mapping = aes(xintercept=q_high))
-    print(g)
-    ggsave(
-        paste(sim_id, "histogram_raw.jpg", sep = "_"),
-        path = path_fig, width = 1.61803, height = 1, scale = 5
-    )
-}
+
 
 {
     g <- ggplot(THETA_acf, aes(lag, acf)) + 
