@@ -2,31 +2,31 @@
 
 {
     rm(list = ls())
-    setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis/slurm")
+    #setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis/slurm")
     library(tidyverse)
     #source("R/helpers.R") # load helper functions
     #load("data/processed/BCSC_40_to_85.RDATA")
     
-    M     <- 1e4
+    M <- 1e4
     
-    data_origin <- c("BCSC", "Swiss", "simulation")[3]
+    data_origin <- c("BCSC", "Swiss", "simulation")[1]
     path_mcmc  <- paste0("output/MCMC/"   , data_origin)
     path_fig   <- paste0("output/figures/", data_origin)
     shape_H <- 2 # 1, 1.1, 1.5, 2 ,2.5, 3, 3.5
     shape_P <- 1
-    AFS_low <- 45
-    AFS_upp <- 74
-    t0  <- 40
+    #AFS_low <- 45
+    #AFS_upp <- 74
+    t0  <- 30
     precision_mean_P <- 0
     mean_mean_P <- 0
     
     sim_id     <- paste0(
         "M=", M,
-        #"-AFS_low=", AFS_low,
-        #"-AFS_upp=", AFS_upp,
+        "-AFS_low=", AFS_low,
+        "-AFS_upp=", AFS_upp,
         "-shape_H=", shape_H,
         "-shape_P=", shape_P,
-        #"-t0=", t0,
+        "-t0=", t0,
         #"-mean_mean_P=", mean_mean_P,
         #"-precision_mean_P=", precision_mean_P,
         ".RDATA"
@@ -40,7 +40,7 @@
    
 }
 
-
+{
 #
 # Run time ####
 (runtime <- out$runtime) / 60 # minutes
@@ -51,7 +51,7 @@
 # Acceptnace rate ####
 mean(out$ACCEPT$ACCEPT_RATE_H)
 mean(out$ACCEPT$ACCEPT_RATE_P)
-mean(out$ACCEPT$ACCEPT_PSI)
+mean(out$ACCEPT$ACCEPT_PSI   )
 
 
 
@@ -69,6 +69,18 @@ THETA <- out$THETA %>%
     pivot_longer(cols = -iteration, names_to = "parameter", values_to = "draws")
 
 
+{
+    g <- ggplot(THETA, aes(iteration, draws)) +
+        geom_line()+
+        facet_wrap(~parameter, scales = "free") +
+        labs(title=paste0("AFS between ", AFS_low, " and ", AFS_upp))
+    print(g)
+    ggsave(
+        paste(sim_id, "traceplot.jpg", sep = "_"),
+        path = path_fig, width = 1.61803, height = 1, scale = 5
+    )
+}
+}
 THETA_summary <- THETA %>%
     group_by(parameter) %>%
     summarize(
@@ -94,17 +106,6 @@ THETA_acf <- THETA %>%
     unnest(test)
 
 THETA_true <- as_tibble(theta)
-
-{
-    g <- ggplot(THETA, aes(iteration, draws)) +
-        geom_line()+
-        facet_wrap(~parameter, scales = "free")
-    print(g)
-    ggsave(
-        paste(sim_id, "traceplot.jpg", sep = "_"),
-        path = path_fig, width = 1.61803, height = 1, scale = 5
-    )
-}
 
 {
     g <- ggplot(THETA, aes(draws)) +
@@ -174,7 +175,7 @@ out$THETA %>%
         MEAN_P = RATE_P^(-1/theta_0$shape_P)*gamma(1+1/theta_0$shape_P),
         iteration = 1:nrow(.)
     ) %>%
-    filter(iteration > 250) %>%
+    #filter(iteration > 500) %>%
     select(-iteration) %>%
     GGally::ggpairs()
 
