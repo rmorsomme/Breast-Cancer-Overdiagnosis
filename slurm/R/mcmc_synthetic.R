@@ -18,7 +18,7 @@ if(is.na(n_cpu))  n_cpu <- 1
 
 #
 # Model setup ####
-shape_H <- 1 # should be 2 (linear) or larger
+shape_H <- 2 # should be 2 (linear) or larger
 shape_P <- 1
 
 
@@ -34,28 +34,29 @@ theta <- list(
 #
 ## Data ####
 t0 <- 30
-n  <- 37e2 #37e3  # sample size
+n  <- 37e1 #37e3  # sample size
 source("R/simulator.R")
 
 
 #
 # MCMC setup ####
-M       <- 1e3 # number of MCMC iterations
+M       <- 1e4 # number of MCMC iterations
 thin    <- round(max(M/1e3, 1))
 
 epsilon_rate_H <- 0.001 # tuning parameter
-epsilon_rate_P <- 0.15
-epsilon_psi    <- 0.3 
+epsilon_rate_P <- 0.05
+epsilon_psi    <- 0.1 
 
-factor_0 <- 1
-theta_0  <- list(
-    rate_H = theta$rate_H*factor_0, shape_H = theta$shape_H,
-    rate_P = theta$rate_P*factor_0, shape_P = theta$shape_P,
-    beta   = min(1-0.01, theta$beta*factor_0), psi = min(1-0.01, theta$psi*factor_0)
-    ) %>% update_scales()
+# factor_0 <- 1
+# theta_0  <- list(
+#     rate_H = theta$rate_H*factor_0, shape_H = theta$shape_H,
+#     rate_P = theta$rate_P*factor_0, shape_P = theta$shape_P,
+#     beta   = min(1-0.01, theta$beta*factor_0), psi = min(1-0.01, theta$psi*factor_0)
+# ) %>% update_scales()
+theta_0  <- theta
 
 
-precision_mean_P <- 3
+precision_mean_P <- 1
 mean_mean_p      <- 5
 prior <- list(
     rate_H = 2e1 , shape_H = 2, # gamma(shape_H, rate_H) prior on Weibull rate for H
