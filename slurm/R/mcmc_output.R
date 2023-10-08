@@ -1,5 +1,3 @@
-
-
 {
     rm(list = ls())
     #setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis/slurm")
@@ -7,18 +5,16 @@
     #source("R/helpers.R") # load helper functions
     #load("data/processed/BCSC_40_to_85.RDATA")
     
-    M <- 1e4
+    M <- 1e3
     
     data_origin <- c("BCSC", "Swiss", "simulation")[1]
-    path_mcmc  <- paste0("output/MCMC/"   , data_origin)
-    path_fig   <- paste0("output/figures/", data_origin)
-    shape_H <- 2 # 1, 1.1, 1.5, 2 ,2.5, 3, 3.5
+    path_mcmc  <- paste0("slurm/output/MCMC/"   , data_origin)
+    path_fig   <- paste0("slurm/output/figures/", data_origin)
+    shape_H <- 2
     shape_P <- 1
-    #AFS_low <- 45
-    #AFS_upp <- 74
+    AFS_low <- 45
+    AFS_upp <- 74
     t0  <- 30
-    precision_mean_P <- 0
-    mean_mean_P <- 0
     
     sim_id     <- paste0(
         "M=", M,
@@ -27,8 +23,6 @@
         "-shape_H=", shape_H,
         "-shape_P=", shape_P,
         "-t0=", t0,
-        #"-mean_mean_P=", mean_mean_P,
-        #"-precision_mean_P=", precision_mean_P,
         ".RDATA"
     )
     file_draws <- paste(path_mcmc, sim_id, sep = "/")
@@ -47,7 +41,7 @@
     print(runtime / 60) # minutes
 
     #
-    # Acceptnace rate ####
+    # Acceptance rate ####
     print(mean(out$ACCEPT$ACCEPT_RATE_H))
     print(mean(out$ACCEPT$ACCEPT_RATE_P))
     print(mean(out$ACCEPT$ACCEPT_PSI   ))
@@ -68,9 +62,10 @@
     {
         # traceplots
         g <- ggplot(THETA, aes(iteration, draws)) +
-            geom_line()+
+            geom_line()  +
+#            labs(title=paste0("AFS between ", AFS_low, " and ", AFS_upp)) +
             facet_wrap(~parameter, scales = "free") +
-            labs(title=paste0("AFS between ", AFS_low, " and ", AFS_upp))
+            labs(x = "Iteration (in 1,000)", y = "Draws")
         print(g)
         ggsave(
             paste(sim_id, "traceplot.jpg", sep = "_"),
@@ -102,7 +97,7 @@ THETA_summary <- THETA %>%
         paste(sim_id, "histogram_raw.jpg", sep = "_"),
         path = path_fig, width = 1.61803, height = 1, scale = 5
     )
-    }
+}
 
 my_acf <- function(draws){
     tmp <- acf(draws, plot = FALSE)
@@ -254,3 +249,4 @@ if(group_id != "censored"){
     abline(v=tau_true, col = "red")
     abline(v=quantile(mcmc_tau, c(0.025, 0.975)), col = "grey")
 }
+
