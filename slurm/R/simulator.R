@@ -1,44 +1,36 @@
 #
 # Helper functions ####
-draw_sojourn_H <- function(theta){
+draw_sojourn_H <- function(theta)
   rweibull(1, shape = theta$shape_H, scale = theta$scale_H)
-}
 
-draw_sojourn_P <- function(theta){
+draw_sojourn_P <- function(theta)
   rweibull(1, shape = theta$shape_P, scale = theta$scale_P)
-}
 
 compute_compartment <- function(t, tau_HP){
-  case_when(
-    t < tau_HP ~ "H",
-    TRUE       ~ "P"
-  )
+  case_when(t < tau_HP ~ "H",
+            TRUE       ~ "P")
 }
 
 screen_result <- function(compartment, theta) {
-  if(compartment == "H")  return(FALSE)  
-  if(compartment == "P")  return(rbernoulli(1, p = theta$beta))
+  if(compartment == "H")  return(FALSE)
+  if(compartment == "P")  return(runif(1) < theta$beta)
 }
 
 #
 # Setup ####
-{
-    d_process <- tibble(
-        person_id = numeric(n),
-        sojourn_H = numeric(n), tau_HP = numeric(n),
-        indolent  = numeric(n),
-        sojourn_P = numeric(n), tau_PC = numeric(n)
-        )
-    
-    d_obs_screen <- tibble(
-        person_id  = numeric(), screen_id       = numeric(), 
-        age_screen = numeric(), screen_detected = numeric()
-        )
-    
-    d_obs_censor <- tibble(
-        person_id = numeric(), censor_type = character(), censor_time = numeric(), AFS = numeric()
-        )
-}
+d_process <- tibble(
+    person_id = numeric(n), sojourn_H = numeric(n), tau_HP = numeric(n),
+    indolent  = numeric(n), sojourn_P = numeric(n), tau_PC = numeric(n)
+    )
+
+d_obs_screen <- tibble(
+    person_id  = numeric(), screen_id       = numeric(), 
+    age_screen = numeric(), screen_detected = numeric()
+    )
+
+d_obs_censor <- tibble(
+    person_id = numeric(), censor_type = character(), censor_time = numeric(), AFS = numeric()
+    )
 
 #
 ## Biological process ####
@@ -50,17 +42,15 @@ for(i in 1 : n){ # person i
     sojourn_P <- if(!indolent) { draw_sojourn_P(theta) } else { Inf }
     tau_PC    <- tau_HP    + sojourn_P
   
-    d_process[i, ] <- tibble(
-        i, sojourn_H, tau_HP, indolent, sojourn_P, tau_PC
-        )
+    d_process[i, ] <- tibble(i, sojourn_H, tau_HP, indolent, sojourn_P, tau_PC)
 }
 
 #
 ## Observation process ####
-for(i in 1 : n){  print(i) # person i
+for(i in 1 : n){  if(i%%100==0)  print(paste0(i, "/", n)) # person i
   
     AFS       <- sample(40:80, 1, prob = exp(-(40:80)/5)) # age at first screen
-    age_death <- min(AFS + rexp(1, 1/7), 100)
+    age_death <- min(AFS + rexp(1, 1/5), 100)
   
     tau_HP    <- d_process$tau_HP[i]
     tau_PC    <- d_process$tau_PC[i]
@@ -88,7 +78,7 @@ for(i in 1 : n){  print(i) # person i
           break
           }
       
-      age_screen <- age_screen + 1 + rpois(1, 0.25)
+      age_screen <- age_screen + 1 + rpois(1, 0.5)
       j <- j + 1
       
       if(tau_PC < age_screen){  # clinical cancer first
@@ -104,6 +94,5 @@ for(i in 1 : n){  print(i) # person i
     }
 }
 
-count(d_obs_censor, censor_type) %>% print()
 count(d_obs_screen, person_id  ) %>% count(n) %>% print()
-beep()
+count(d_obs_censor, censor_type) %>% print()
