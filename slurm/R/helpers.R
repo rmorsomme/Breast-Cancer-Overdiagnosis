@@ -321,51 +321,6 @@ compute_integral <- function(L, U, theta){
         .[["value"]]
 }
 
-compute_integral_11 <- function(L, U, rate_H, rate_P){ # special case if shape_H=shape_p=1
-    
-    l1 <- rate_H
-    l2 <- rate_P
-    
-    l_diff <- l1-l2
-    # l1*exp(-l2*U) * (exp(-L*l_diff) - exp(-U*l_diff)) / l_diff
-    integral_log <- if(l_diff > 0){
-        log(l1) - l2*U - log(l_diff ) + log(exp(-L*l_diff)-exp(-U*l_diff))
-    }else{
-        log(l1) - l2*U - log(-l_diff) + log(exp(-U*l_diff)-exp(-L*l_diff))
-    }
-    integral <- exp(integral_log)
-    return(integral)
-}
-
-compute_integral_21 <- function(L, U, rate_H, rate_P){ # special case if shape_H=2, shape_p=1
-    
-    # do not use this function, it is too unstable.
-    # Z * mu - s * (dnorm(b)-dnorm(a)) is sometimes negative,
-    # because dnorm(b)-dnorm(a) is evaluated to be e-320
-    # but Z <- pnorm(b)-pnorm(a) is (wrongly) evaluated to be 0.
-    
-    l1 <- rate_H
-    l2 <- rate_P
-    
-    r <- l2/l1
-    mu <- r/2
-    s <- 1/sqrt(2*l1)
-    a <- (L-mu)/s
-    b <- (U-mu)/s
-    Z <- pnorm(b)-pnorm(a)
-    
-    #2*l1*exp(-U*l2) * exp((mu/s)^2/2) * 
-    ##s * sqrt(2*pi) * Z * (mu     - s * (dnorm(b)-dnorm(a)) / Z )
-    #    s * sqrt(2*pi)      * (Z * mu - s * (dnorm(b)-dnorm(a))     )
-    
-    # TODO: simplify mu/s
-    integral_log <- log(2) + log(l1) - U*l2 + (mu/s)^2/2 + log(s) + log(2)/2 + log(pi)/2 + 
-        log(Z * mu - s * (dnorm(b)-dnorm(a)))
-    integral <- exp(integral_log)
-    return(integral)
-    
-}
-
 compute_cp_log <- function(theta, AFS, t0){
     
     L <- 0        # lower bound
@@ -373,18 +328,7 @@ compute_cp_log <- function(theta, AFS, t0){
     
     prob_onset_after <- pweibull(U, theta$shape_H, theta$scale_H, lower.tail = FALSE)
     
-    # integral_numeric    <- compute_integral_11(L, U, theta$rate_H, theta$rate_P)
-    # integral_analytical <- compute_integral(L, U, theta)
-    # rel_err <- (integral_numeric-integral_analytical)/integral_analytical
-    # stopifnot(rel_err < 1e-5)
-    
-    integral <- #if(theta$shape_H == 1 & theta$shape_P == 1){
-        #compute_integral_11(L, U, theta$rate_H, theta$rate_P)
-    #}else if(theta$shape_H == 2 & theta$shape_P == 1){ # do not use the function compute_integral_21(), it is too unstable
-    #    compute_integral_21(L, U, theta$rate_H, theta$rate_P)
-    #}else{
-        compute_integral(L, U, theta)
-    #}
+    integral <- compute_integral(L, U, theta)
     
     cp     <- theta$psi + (1-theta$psi) * (prob_onset_after + integral) # conditioning probability
     cp_log <- log(cp)
@@ -411,19 +355,10 @@ MH_rate_H <- function(tau_HP, theta_cur, prior, censor_time, t0, AFS, n_AFS, n_c
     rate_H_cur  <- theta_cur$rate_H # for evaluating prior density
     
     # propose a new value
-    # a_n         <- prior$shape_H + sum(is.finite(tau_HP)) # number of observed weibull
-    # sojourn_H   <- pmin(tau_HP, censor_time) - t0
-    # sum_sojourn <- sum(sojourn_H^theta$shape_H) 
-    # b_n         <- prior$rate_H + sum_sojourn
-    
-    #rate_H_new  <- rgamma(1, shape = a_n, rate = b_n) # full conditional, ignoring conditioning probabilities
-    
     rate_H_new <- rprop_rate_H(theta_cur, epsilon_rate_H) # symmetric proposal
     theta_new  <- add_rate_H(theta_cur, rate_H_new)  # for dloglik_rate_H()
     
     # M-H acceptance ratio
-    #dlog_prop_new  <- dgamma(rate_H_new, shape = a_n, rate = b_n, log = TRUE)
-    #dlog_prop_cur  <- dgamma(rate_H_cur, shape = a_n, rate = b_n, log = TRUE)
     dlog_lik_cur   <- dloglik_rate_H(tau_HP, theta_cur, censor_time, AFS, n_AFS, t0, n_cpu)
     dlog_lik_new   <- dloglik_rate_H(tau_HP, theta_new, censor_time, AFS, n_AFS, t0, n_cpu)
     dlog_prior_new <- dgamma(rate_H_new, shape = prior$shape_H, rate = prior$rate_H, log = TRUE)
@@ -524,11 +459,6 @@ compute_prob_tau_i <- function(censor_type_i, censor_time_i, endpoints_i, theta,
         
     } else if(censor_type_i == "clinical"){
         
-        # pweibull_ab(
-        #   endpoints_i[1:K    ] - t0,
-        #   endpoints_i[1:K + 1] - t0,
-        #   shape = theta$shape_H, scale = theta$scale_H
-        # ) *
         pweibull_ab(
             censor_time_i - endpoints_i[1:K + 1],
             censor_time_i - endpoints_i[1:K    ],
@@ -719,7 +649,6 @@ rprop_indolent <- function(censor_type, prob_indolent, n_cpu){
     )
 }
 
-
 dlog_prop_indolent_i <- function(indolent_i, censor_type_i, prob_indolent_i){
     
     dlog <- if(censor_type_i == "clinical"){
@@ -821,46 +750,6 @@ dlog_prop_latent <- function(
     ) %>% sum()
 }
 
-
-#
-# M-H (tau, indolent) ####
-# 
-# MH_latent_i <- function(tau_HP_cur_i, indolent_cur_i, censor_type_i, censor_time_i, age_screen_i, endpoints_i, n_screen_positive_i, theta, t0){
-#     
-#     # propose new latent
-#     prob_tau_i          <- compute_prob_tau_i(censor_type_i, censor_time_i, endpoints_i, theta, t0)
-#     tau_HP_new_i        <- rprop_tau_HP_i(censor_type_i, censor_time_i, endpoints_i, prob_tau_i, theta, t0)
-#     prob_indolent_new_i <- compute_prob_indolent_i(tau_HP_new_i, censor_type_i, censor_time_i, theta)
-#     indolent_new_i      <- rprop_indolent_i(censor_type_i, prob_indolent_new_i)
-#     
-#     # M-H acceptance ratio
-#     prob_indolent_cur_i <- compute_prob_indolent_i(tau_HP_cur_i, censor_type_i, censor_time_i, theta)
-#     dlog_prop_cur_i     <- dlog_prop_latent_i(tau_HP_cur_i, indolent_cur_i, censor_type_i, censor_time_i, endpoints_i, prob_tau_i, prob_indolent_cur_i, theta, t0)
-#     dlog_prop_new_i     <- dlog_prop_latent_i(tau_HP_new_i, indolent_new_i, censor_type_i, censor_time_i, endpoints_i, prob_tau_i, prob_indolent_new_i, theta, t0)
-#     dlog_lik_cur_i      <- dlog_likelihood_i(tau_HP_cur_i, indolent_cur_i, censor_type_i, censor_time_i, age_screen_i, n_screen_positive_i, theta, t0)
-#     dlog_lik_new_i      <- dlog_likelihood_i(tau_HP_new_i, indolent_new_i, censor_type_i, censor_time_i, age_screen_i, n_screen_positive_i, theta, t0)
-#     
-#     MH_logratio_i <- dlog_lik_new_i - dlog_lik_cur_i + dlog_prop_cur_i - dlog_prop_new_i
-#     
-#     out <- if(runif(1) < exp(MH_logratio_i)){ # accept new latent data
-#         c(tau_HP_new_i, indolent_new_i, TRUE)
-#     }else{ # keep current latent data
-#         c(tau_HP_cur_i, indolent_cur_i, FALSE)
-#     }
-#     
-#     return(out)
-#     
-# }
-# 
-# MH_latent <- function(tau_HP_cur, indolent_cur, censor_type, censor_time, age_screen, endpoints, n_screen_positive, theta, n_cpu, t0){
-#     mcmapply(
-#         MH_latent_i,
-#         tau_HP_cur, indolent_cur, censor_type, censor_time, age_screen, endpoints, n_screen_positive,
-#         MoreArgs = list(theta = theta, t0 = t0),
-#         USE.NAMES = FALSE,
-#         mc.cores = n_cpu
-#     )
-# }
 
 #
 # M-H tau ####
@@ -1038,14 +927,6 @@ MCMC <- function(
             
             # Gibbs beta
             theta <- gibbs_beta(tau_HP, theta, screens, prior, n_screen_positive_total)
-            
-            # update (rate_H, rate_P, beta)
-            #rate_H <- gibbs_rate_H(tau_HP, theta, prior, censor_time, t0)
-            #rate_P <- gibbs_rate_P(tau_HP, indolent, theta, prior, censor_type, censor_time)
-            # theta  <- list(
-            #     rate_H  = rate_H         , rate_P  = rate_P         , psi = theta$psi, beta = beta,
-            #     shape_H = theta_0$shape_H, shape_P = theta_0$shape_P
-            # ) %>% update_scales()
             
             # update (psi, indolent)
             out_psi_indolent <- MH_psi_indolent(theta, indolent, tau_HP, censor_type, censor_time, epsilon_psi, prior, AFS, n_AFS, t0, n_cpu)
