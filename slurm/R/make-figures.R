@@ -1,3 +1,23 @@
+
+#
+# Misc. ####
+theta <- list(
+    rate_H = 1/580, shape_H = 2,
+    rate_P = 1/6  , shape_P = 1,
+    beta   = 0.85, psi = 0.1
+) %>% update_scales()
+
+t0=30
+age_screen = 40+5*(1:5)
+
+for(censor_type in c("censored", "screen")) {
+    proposal_vs_target(censor_type, age_screen, theta, t0)
+}
+
+
+#
+# Simulations ####
+
 {
     #
     # setup ####
@@ -50,6 +70,8 @@
 #
 # Data
 d_obs_censor %>% count()
+d_obs_censor %>% count(censor_type)
+d_obs_screen %>% count()
 
 
 #
@@ -71,8 +93,6 @@ save_figures("traceplot_transient", path = path_fig, scale = scale)
 
 #
 # Traceplot - recurrent
-
-# Traceplot
 out$THETA %>%
     as_tibble() %>%
     mutate(
@@ -130,7 +150,7 @@ out$THETA %>%
 
 
 #
-# latent data
+# latent data ####
 
 # find a screen-detected with multiple negative screens
 d_obs_censor %>%
@@ -177,16 +197,104 @@ save_figures("histogram_tau", path = path_fig, scale = scale)
 
 
 #
-# Misc.
-theta <- list(
-    rate_H = 1/580, shape_H = 2,
-    rate_P = 1/6  , shape_P = 1,
-    beta   = 0.85, psi = 0.1
-) %>% update_scales()
-
-t0=30
-age_screen = 40+5*(1:5)
-
-for(censor_type in c("censored", "screen")) {
-    proposal_vs_target(censor_type, age_screen, theta, t0)
+# BCSC ####
+{
+    source("slurm/R/helpers.R")
+    source("slurm/R/helpers-figures.R")
+    scale = 6
+    
+    # paths to files and figures
+    path_mcmc  <- "slurm/output/MCMC/BCSC"
+    path_fig   <- "slurm/output/figures/BCSC"
+    
+    # Load data
+    shape_P = 1
+    shape_H = 2
+    t0 = 30
+    sim_id     <- paste0(
+        "M=", 1e5,
+        "-AFS_low=", 50,
+        "-AFS_upp=", 74,
+        "-shape_H=", shape_H,
+        "-shape_P=", shape_P,
+        "-t0=", t0,
+        ".RDATA"
+    )
+    
+    file_draws <- paste(path_mcmc, sim_id, sep = "/")
+    
+    load(file_draws)
+    
+    # Run time ####
+    runtime <- out$runtime
+    print(runtime / 3600) # hours
+    
+    # Acceptance rate ####
+    print(mean(out$ACCEPT$ACCEPT_RATE_H))
+    print(mean(out$ACCEPT$ACCEPT_RATE_P))
+    print(mean(out$ACCEPT$ACCEPT_PSI   ))
 }
+
+# data
+d_obs_censor %>% count()
+d_obs_censor %>% count(censor_type)
+d_obs_screen %>% count()
+
+
+# marginal posterior: psi, mean_P
+tbl_theta = out$THETA %>%
+    as_tibble() %>%
+    mutate(
+        MEAN_P = RATE_P^(-1/shape_P)*gamma(1+1/shape_P),
+        MEAN_H = RATE_H^(-1/shape_H)*gamma(1+1/shape_H)
+        )
+
+tbl_theta %>%
+    ggplot(aes(x = PSI)) +
+    geom_density() +
+    geom_vline(xintercept = mean(tbl_theta$PSI), linetype="dashed", colour = "maroon") +
+    geom_vline(xintercept = quantile(tbl_theta$PSI, c(0.025, 0.975)), linetype="dotted", colour = "maroon") +
+    labs(x = expression(psi), y = "Density")
+save_figures("histogram_psi", path = path_fig, scale = scale)
+
+tbl_theta %>%
+    as_tibble() %>%
+    ggplot(aes(x = MEAN_P)) +
+    geom_density() +
+    geom_vline(xintercept = mean(tbl_theta$MEAN_P), linetype="dashed", colour = "maroon") +
+    geom_vline(xintercept = quantile(tbl_theta$MEAN_P, c(0.025, 0.975)), linetype="dotted", colour = "maroon") +
+    labs(x = "Expected pre-clinical\nsojourn time", y = "Density")
+save_figures("histogram_mean_P", path = path_fig, scale = scale)
+
+# hazard
+rate_H_quantile = quantile(tbl_theta$RATE_H, c(0.025, 0.5, 0.975))
+tibble(ages = seq(t0, 90, by = 0.1)) %>%
+    mutate(
+        h_low = shape_H * rate_H_quantile[1] * (ages-t0)^(shape_H-1),
+        h_med = shape_H * rate_H_quantile[2] * (ages-t0)^(shape_H-1),
+        h_upp = shape_H * rate_H_quantile[3] * (ages-t0)^(shape_H-1),
+        ) %>%
+    #pivot_longer(cols=h_low:h_upp, names_to = "hazard_type", values_to = "hazard") %>%
+    ggplot(aes(x=ages)) +
+    geom_line(aes(y=h_med)) +
+    geom_line(aes(y=h_low), linetype = "dashed") +
+    geom_line(aes(y=h_upp), linetype = "dashed") +
+    labs(x="Age", y = "Hazard rate for\npre-clinical cancer")
+save_figures("hazard", path = path_fig, scale = scale)
+
+# hazard at ages 47.5, 60 and 70
+print(signif(shape_H * rate_H_quantile * (47.5 - t0)^(shape_H-1)), 2)
+print(signif(shape_H * rate_H_quantile * (60   - t0)^(shape_H-1)), 2)
+print(signif(shape_H * rate_H_quantile * (70   - t0)^(shape_H-1)), 2)
+
+# posterior summary
+tbl_theta %>%
+    pivot_longer(cols = RATE_H:MEAN_H, names_to = "parameter", values_to = "draws") %>%
+    group_by(parameter) %>%
+    summarize(
+        mean    = mean(draws),
+        q_low   = quantile(draws, probs = 0.025),
+        q_high  = quantile(draws, probs = 0.975),
+        ESS     = coda::effectiveSize(draws),
+        ESS_sec = ESS / out$runtime
+    )
