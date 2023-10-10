@@ -22,6 +22,7 @@ shape_P <- 1
 
 #
 # Parameters ####
+# these values are taken from Ryser et al. (2022)
 theta <- list(
     rate_H = 7.5e-5, shape_H = shape_H,
     rate_P = 1/7  , shape_P = shape_P,

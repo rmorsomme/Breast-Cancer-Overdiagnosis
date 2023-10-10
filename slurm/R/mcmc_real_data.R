@@ -55,8 +55,8 @@ shape_P <- 1
 
 #
 # MCMC setup ####
-M       <- 1e4 # number of MCMC iterations
-thin    <- round(max(M/1e3, 1))
+M       <- 1e5 # number of MCMC iterations
+thin    <- round(max(M/1e4, 1))
 
 # step size of RW
 epsilon_rate_H <- 5e-6
@@ -77,7 +77,7 @@ epsilon_psi    <- 0.07
 prior <- list(
   # flat priors
   rate_P = 0.01, shape_P = 1,
-  a_beta = 1, b_beta  = 1,  # beta(a_beta, b_beta) prior on beta
+  #a_beta = 1, b_beta  = 1,  # beta(a_beta, b_beta) prior on beta
   
   # informative priors
   #rate_P = (mean_P_precision - 1) / lambda_P_mean, shape_P = mean_P_precision, # gamma(shape_P, rate_P) prior on the Weibull (exponential) rate for P

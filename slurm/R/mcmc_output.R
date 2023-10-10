@@ -5,14 +5,14 @@
     #source("R/helpers.R") # load helper functions
     #load("data/processed/BCSC_40_to_85.RDATA")
     
-    M <- 1e3
+    M <- 1e4
     
     data_origin <- c("BCSC", "Swiss", "simulation")[1]
     path_mcmc  <- paste0("slurm/output/MCMC/"   , data_origin)
     path_fig   <- paste0("slurm/output/figures/", data_origin)
     shape_H <- 2
     shape_P <- 1
-    AFS_low <- 45
+    AFS_low <- 50
     AFS_upp <- 74
     t0  <- 30
     
