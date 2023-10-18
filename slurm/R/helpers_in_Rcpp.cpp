@@ -123,6 +123,24 @@ NumericVector pweibull_ab(NumericVector a,
 // @returns NumericVector The generated samples.
 //
 // @keywords internal
+// NumericVector rweibull_trunc(NumericVector a, 
+//                              NumericVector b, 
+//                              double shape, 
+//                              double scale) {
+//     
+//     NumericVector low = pweibull(a, shape, scale);
+//     NumericVector high = pweibull(b, shape, scale);
+//     
+//     NumericVector u = no_init(low.size());
+//     // populate each element of `u`, u_i, with a random draw from U(low_i, high_i)
+//     std::transform(low.begin(), 
+//                    low.end(), 
+//                    high.begin(),
+//                    u.begin(), [=](double low, double high){ return runif(1, low, high)[0]; }); 
+//     
+//     return qweibull(u, shape, scale);
+// }
+
 NumericVector rweibull_trunc(NumericVector a, 
                              NumericVector b, 
                              double shape, 
@@ -131,15 +149,12 @@ NumericVector rweibull_trunc(NumericVector a,
     NumericVector low = pweibull(a, shape, scale);
     NumericVector high = pweibull(b, shape, scale);
     
-    NumericVector u = no_init(low.size());
-    // populate each element of `u`, u_i, with a random draw from U(low_i, high_i)
-    std::transform(low.begin(), 
-                   low.end(), 
-                   high.begin(),
-                   u.begin(), [=](double low, double high){ return runif(1, low, high)[0]; }); 
+    NumericVector ru = Rcpp::runif(low.size());
+    NumericVector u = low + (high - low) * ru;
     
     return qweibull(u, shape, scale);
 }
+
 
 // Truncated Weibull Probability Density
 //
@@ -2063,6 +2078,7 @@ List MCMC_cpp_internal(List data_objects, List indolents, List prior,
         // Gibbs beta
         theta = gibbs_beta(data_objects, prior, age_at_tau_hp_hats, theta, n_screen_positive_total);
         
+        // if(need_indolent)
         // update (psi, indolent)
         List out_psi_indolent = MH_psi_indolent(data_objects, indolents, prior, age_at_tau_hp_hats, theta,
                                                 AFS, n_AFS, epsilon_psi, t0);
