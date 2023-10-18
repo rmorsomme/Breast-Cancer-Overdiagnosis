@@ -1,4 +1,7 @@
 #!/bin/bash
+#SBATCH --nodes=1
+#SBATCH --tasks-per-node=1
+#SBATCH -a 1-5
 #SBATCH -o slurm/slurm_files/experiment.out
 #SBATCH -e slurm/slurm_files/experiment.err
 #SBATCH -p common,statdept
