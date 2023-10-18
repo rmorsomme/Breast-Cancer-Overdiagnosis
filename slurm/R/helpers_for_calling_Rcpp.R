@@ -178,8 +178,15 @@ MCMC_cpp <- function(
     
     prob_tau_0 <- compute_prob_tau_List(data.obj, theta, t0)
     age_at_tau_hp_hats <- rprop_age_at_tau_hp_hat_List(data.obj, prob_tau_0, theta, t0)
+    # if(need_idolent)
     prob_indolent_0 <- compute_prob_indolent_List(data.obj, age_at_tau_hp_hats, theta)
+    #else
+    #prob_indolent_0 = list(1)
+    
+    # if(need_idolent)
     indolents <- rprop_indolent_List(data.obj, prob_indolent_0)
+    #else
+    #indolent = rep(0, n) # should be 0 (progressive) not 1 (indolent)
     
     
     tic()
