@@ -3,6 +3,7 @@ rm(list = ls())
 
 #
 # Set up
+#setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis/slurm")
 
 library(tidyverse)
 library(tictoc)
@@ -24,15 +25,14 @@ data_origin <- c("BCSC", "Swiss")[1]
 if(data_origin == "BCSC") {
   
     load("data/processed/BCSC_40_to_85.RDATA")
-    AFS_low <- 50
-    AFS_upp <- 74
-    #n   <- min(1e5, nrow(d_obs_censor %>% filter(AFS %>% between(AFS_low, AFS_upp))))
-    
+    AFS_low <- 45
+    AFS_upp <- 49
+
     #plot(table(d_obs_censor$AFS))
   
     d_obs_censor <- d_obs_censor %>%
         filter(AFS %>% between(AFS_low, AFS_upp)) %>%
-        #slice_sample(n = 2e4) %>%
+        slice_sample(n = 3e4) %>%
         arrange(person_id)
   
     d_obs_screen <- d_obs_screen %>%
@@ -48,8 +48,10 @@ if(data_origin == "BCSC") {
 
 #
 # Model setup ####
-t0      <- 30
-shape_H <- 2
+a <- as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID"))
+if(is.na(a)) a = 1
+t0      <- seq(20, 40, length.out=5)[a]
+shape_H <- 1.5
 shape_P <- 1
 
 
@@ -59,9 +61,9 @@ M       <- 1e5 # number of MCMC iterations
 thin    <- round(max(M/1e4, 1))
 
 # step size of RW
-epsilon_rate_H <- 5e-6
-epsilon_rate_P <- 0.025
-epsilon_psi    <- 0.07
+epsilon_rate_H <- 4e-5
+epsilon_rate_P <- 0.05
+epsilon_psi    <- 0.05
 
 # a <- as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID")) - 1
 # if(is.na(a))  a <- 0
@@ -150,3 +152,4 @@ save(
 print(mean(out$ACCEPT$ACCEPT_RATE_H))
 print(mean(out$ACCEPT$ACCEPT_RATE_P))
 print(mean(out$ACCEPT$ACCEPT_PSI   ))
+

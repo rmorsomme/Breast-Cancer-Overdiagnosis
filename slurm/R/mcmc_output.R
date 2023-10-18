@@ -1,20 +1,20 @@
 {
     rm(list = ls())
-    #setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis/slurm")
+    setwd("C:/Users/18582/Desktop/Research/Marc/Breast Cancer Overdiagnosis")
     library(tidyverse)
     #source("R/helpers.R") # load helper functions
     #load("data/processed/BCSC_40_to_85.RDATA")
     
-    M <- 1e4
+    M <- 1e5
     
     data_origin <- c("BCSC", "Swiss", "simulation")[1]
     path_mcmc  <- paste0("slurm/output/MCMC/"   , data_origin)
     path_fig   <- paste0("slurm/output/figures/", data_origin)
-    shape_H <- 2
+    shape_H <- 1.5
     shape_P <- 1
-    AFS_low <- 50
-    AFS_upp <- 74
-    t0  <- 30
+    AFS_low <- 45
+    AFS_upp <- 49
+    t0  <- 20
     
     sim_id     <- paste0(
         "M=", M,
@@ -31,14 +31,12 @@
     
     theta$mean_H <- theta$rate_H^(-1/shape_H)*gamma(1+1/shape_H)
     theta$mean_P <- theta$rate_P^(-1/shape_P)*gamma(1+1/shape_P)
-   
 }
 
 {
-    #
     # Run time ####
     runtime <- out$runtime
-    print(runtime / 60) # minutes
+    print(paste0("Run time: ", round(runtime/60, 2), " minutes (", round(runtime/3600, 2), " hours)" )) # minutes (hours)
 
     #
     # Acceptance rate ####
@@ -53,19 +51,21 @@
         mutate(
             MEAN_H = RATE_H^(-1/theta_0$shape_H)*gamma(1+1/theta_0$shape_H),
             MEAN_P = RATE_P^(-1/theta_0$shape_P)*gamma(1+1/theta_0$shape_P),
-            iteration = 1:nrow(.)
+            iteration = (1:nrow(.)) * thin,
+            iteration_1000 = iteration / 1e3
         ) %>%
         #filter(iteration > 100) %>% # remove burnin
-        pivot_longer(cols = -iteration, names_to = "parameter", values_to = "draws")
+        pivot_longer(cols = RATE_H:MEAN_P, names_to = "parameter", values_to = "draws")
 
 
     {
         # traceplots
-        g <- ggplot(THETA, aes(iteration, draws)) +
+        g <- ggplot(THETA, aes(iteration_1000, draws)) +
             geom_line()  +
 #            labs(title=paste0("AFS between ", AFS_low, " and ", AFS_upp)) +
             facet_wrap(~parameter, scales = "free") +
-            labs(x = "Iteration (in 1,000)", y = "Draws")
+            labs(x = "Iteration (in 1,000)", y = "Draws") +
+            labs(title=paste0("AFS: ", AFS_low, "-", AFS_upp), subtitle = paste0("t_0=", t0, "; shape_H=", shape_H)) 
         print(g)
         ggsave(
             paste(sim_id, "traceplot.jpg", sep = "_"),
@@ -74,24 +74,29 @@
     }
 }
 
-THETA_summary <- THETA %>%
-    group_by(parameter) %>%
-    summarize(
-        mean    = mean(draws),
-        q_low   = quantile(draws, probs = 0.025),
-        q_high  = quantile(draws, probs = 0.975),
-        ESS     = coda::effectiveSize(draws),
-        ESS_sec = ESS / out$runtime
-    ) %>%
-    print()
-
 {
+    burnin = M/2
+    THETA_summary <- THETA %>%
+        filter(iteration > M/2) %>%
+        group_by(parameter) %>%
+        summarize(
+            mean    = mean(draws),
+            q_low   = quantile(draws, probs = 0.025),
+            q_high  = quantile(draws, probs = 0.975),
+            ESS     = coda::effectiveSize(draws),
+            ESS_sec = ESS / out$runtime
+        ) %>%
+        print()
+
     # histograms
-    g <- ggplot(THETA, aes(draws)) +
+    g <- THETA %>%
+        filter(iteration > M/2) %>%
+        ggplot(aes(draws)) +
         geom_histogram(aes(y = after_stat(density))) +
         facet_wrap(~parameter, scales = "free") +
         geom_vline(data = THETA_summary, mapping = aes(xintercept=q_low)) +
-        geom_vline(data = THETA_summary, mapping = aes(xintercept=q_high))
+        geom_vline(data = THETA_summary, mapping = aes(xintercept=q_high)) +
+        labs(title=paste0("AFS: ", AFS_low, "-", AFS_upp), subtitle = paste0("t_0=", t0, "; shape_H=", shape_H)) 
     print(g)
     ggsave(
         paste(sim_id, "histogram_raw.jpg", sep = "_"),
