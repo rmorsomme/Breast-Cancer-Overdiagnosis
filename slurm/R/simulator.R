@@ -1,106 +1,78 @@
-#
-# Helper functions ####
-draw_sojourn_H <- function(theta)
-  rweibull(1, shape = theta$shape_H, scale = theta$scale_H)
+sojourn_H <- stats::rweibull(n, shape = theta$shape_H, scale = theta$scale_H)
+tau_HP <- t0 + sojourn_H
+indolent <- stats::runif(n) < theta$psi
+sojourn_P <- stats::rweibull(n, shape = theta$shape_P, scale = theta$scale_P)
+sojourn_P[indolent] <- Inf
+tau_PC <- tau_HP + sojourn_P
 
-draw_sojourn_P <- function(theta)
-  rweibull(1, shape = theta$shape_P, scale = theta$scale_P)
-
-compute_compartment <- function(t, tau_HP){
-  case_when(t < tau_HP ~ "H",
-            TRUE       ~ "P")
-}
-
-screen_result <- function(compartment, theta) {
-  if(compartment == "H")  return(FALSE)
-  if(compartment == "P")  return(runif(1) < theta$beta)
-}
-
-#
-# Setup ####
-d_process <- tibble(
-    person_id = numeric(n), sojourn_H = numeric(n), tau_HP = numeric(n),
-    indolent  = numeric(n), sojourn_P = numeric(n), tau_PC = numeric(n)
-    )
-
-d_obs_screen <- tibble(
-    person_id  = numeric(), screen_id       = numeric(), 
-    age_screen = numeric(), screen_detected = numeric()
-    )
-
-d_obs_censor <- tibble(
-    person_id = numeric(), censor_type = character(), censor_time = numeric(), AFS = numeric()
-    )
-
-#
-## Biological process ####
-for(i in 1 : n){ # person i
-    
-    sojourn_H <- draw_sojourn_H(theta)
-    tau_HP    <- t0 + sojourn_H
-    indolent  <- runif(1) < theta$psi
-    sojourn_P <- if(!indolent) { draw_sojourn_P(theta) } else { Inf }
-    tau_PC    <- tau_HP    + sojourn_P
-  
-    d_process[i, ] <- tibble(i, sojourn_H, tau_HP, indolent, sojourn_P, tau_PC)
-}
+d_obs_screen <- matrix(0.0, nrow = n*30, ncol = 4)
+d_obs_censor <- data.frame(person_id = numeric(n),
+                           censor_type = character(n),
+                           censor_time = numeric(n),
+                           AFS = numeric(n))
 
 #
 ## Observation process ####
-for(i in 1 : n){  if(i%%1e3==0)  print(paste0(i, "/", n)) # person i
+k <- 0L
+kc <- 0L
+AFS <- sample(40L:80L, n, prob = exp(-(40:80)/5), replace = TRUE)
+age_death <- pmin(AFS + stats::rexp(n, 1/5), 100.0)
+
+for (i in 1L:n) { 
+  if (i %% 1e3 == 0L)  print(paste0(i, "/", n)) # person i
   
-    AFS       <- sample(40:80, 1, prob = exp(-(40:80)/5)) # age at first screen
-    age_death <- min(AFS + rexp(1, 1/5), 100)
+  if(tau_PC[i] < AFS[i])  next # we do not observe individuals that develop a clinical cancer before their first screen.
   
-    tau_HP    <- d_process$tau_HP[i]
-    tau_PC    <- d_process$tau_PC[i]
+  # generate screens until around age_death
+  intervals <- 1.0 + stats::rpois(ceiling(age_death[i]) - AFS[i], 0.5)
+  ages_screen <- AFS[i] + cumsum(intervals)
+  ages_screen <- c(AFS[i], ages_screen)
+
+  for (j in 1L:length(ages_screen)) {
     
-    if(tau_PC < AFS)  next # we do not observe individuals that develop a clinical cancer before their first screen.
-    
-    age_screen <- AFS
-    j <- 1
-    
-    while(age_screen < 1e4){ # while-loop will stop before age_screen > 150, see the three `break` statements
-        
-      # do a screen
-      compartment     <- compute_compartment(age_screen, tau_HP)
-      screen_detected <- screen_result(compartment, theta) # screen outcome
-      
-      # add the screen to the data
-      d_obs_screen    <- d_obs_screen %>% 
-        add_row(
-          person_id = i, screen_id = j,
-          age_screen = age_screen,
-          screen_detected = screen_detected
-        )
-      
-      # if screen is positive, break
-      if(screen_detected){
-          d_obs_censor <- d_obs_censor %>% 
-              add_row(person_id = i, censor_type  = "screen", censor_time = age_screen, AFS = AFS)
-          break
-          }
-      
-      # age of next screen
-      inter_screen_interval = 1 + rpois(1, 0.5) # random waiting time until next screen
-      age_screen <- age_screen + inter_screen_interval
-      j <- j + 1
-      
-      # if clinical cancer before next screen, break
-      if(tau_PC < age_screen){
-          d_obs_censor <- d_obs_censor %>% 
-              add_row(person_id = i, censor_type  = "clinical", censor_time = tau_PC, AFS = AFS)
-          break
-          }
-      
-      # if death before next screen, break
-      if(age_death < age_screen){
-          d_obs_censor <- d_obs_censor %>% 
-              add_row(person_id = i, censor_type  = "censored", censor_time = age_death, AFS = AFS)
-          break
-          }
+    # if clinical cancer before next screen, break
+    if (tau_PC[i] < ages_screen[j]) {
+      kc <- kc + 1L
+      d_obs_censor$person_id[kc] <- i
+      d_obs_censor$censor_type[kc] <- "clinical"
+      d_obs_censor$censor_time[kc] <- tau_PC[i]
+      d_obs_censor$AFS[kc] <- AFS[i]
+      break
     }
+    
+    # if death before next screen, break
+    if (age_death[i] < ages_screen[j]) {
+      kc <- kc + 1L
+      d_obs_censor$person_id[kc] <- i
+      d_obs_censor$censor_type[kc] <- "censored"
+      d_obs_censor$censor_time[kc] <- age_death[i]
+      d_obs_censor$AFS[kc] <- AFS[i]
+      break
+    }
+
+    if (ages_screen[j] < tau_HP[i]) {
+      screen_detected <- FALSE
+    } else {
+      screen_detected <- stats::runif(1L) < theta$beta
+    }
+    
+    # add the screen to the data
+    k <- k + 1L
+    d_obs_screen[k, ] <- c(i, j, ages_screen[j], screen_detected)
+
+    # if screen is positive, break
+    if (screen_detected) {
+      kc <- kc + 1L
+      d_obs_censor$person_id[kc] <- i
+      d_obs_censor$censor_type[kc] <- "screen"
+      d_obs_censor$censor_time[kc] <- ages_screen[j]
+      d_obs_censor$AFS[kc] <- AFS[i]
+      break
+    }
+    
+  }
 }
 
-# d_obs_screen %>% count(person_id  ) %>% count(n) %>% print() # distribution of total number of screens
-# d_obs_censor %>% count(censor_type) %>% print()
+d_obs_censor <- d_obs_censor[1L:kc, ]
+d_obs_screen <- data.frame(d_obs_screen[1L:k, ])
+colnames(d_obs_screen) <- c("person_id", "screen_id", "age_screen", "screen_detected")
