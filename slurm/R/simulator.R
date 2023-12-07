@@ -47,7 +47,7 @@ for(i in 1 : n){ # person i
 
 #
 ## Observation process ####
-for(i in 1 : n){  if(i%%100==0)  print(paste0(i, "/", n)) # person i
+for(i in 1 : n){  if(i%%1e3==0)  print(paste0(i, "/", n)) # person i
   
     AFS       <- sample(40:80, 1, prob = exp(-(40:80)/5)) # age at first screen
     age_death <- min(AFS + rexp(1, 1/5), 100)
@@ -62,9 +62,11 @@ for(i in 1 : n){  if(i%%100==0)  print(paste0(i, "/", n)) # person i
     
     while(age_screen < 1e4){ # while-loop will stop before age_screen > 150, see the three `break` statements
         
+      # do a screen
       compartment     <- compute_compartment(age_screen, tau_HP)
-      screen_detected <- screen_result(compartment, theta)
+      screen_detected <- screen_result(compartment, theta) # screen outcome
       
+      # add the screen to the data
       d_obs_screen    <- d_obs_screen %>% 
         add_row(
           person_id = i, screen_id = j,
@@ -72,21 +74,27 @@ for(i in 1 : n){  if(i%%100==0)  print(paste0(i, "/", n)) # person i
           screen_detected = screen_detected
         )
       
-      if(screen_detected){  # positive screen first
+      # if screen is positive, break
+      if(screen_detected){
           d_obs_censor <- d_obs_censor %>% 
               add_row(person_id = i, censor_type  = "screen", censor_time = age_screen, AFS = AFS)
           break
           }
       
-      age_screen <- age_screen + 1 + rpois(1, 0.5)
+      # age of next screen
+      inter_screen_interval = 1 + rpois(1, 0.5) # random waiting time until next screen
+      age_screen <- age_screen + inter_screen_interval
       j <- j + 1
       
-      if(tau_PC < age_screen){  # clinical cancer first
+      # if clinical cancer before next screen, break
+      if(tau_PC < age_screen){
           d_obs_censor <- d_obs_censor %>% 
               add_row(person_id = i, censor_type  = "clinical", censor_time = tau_PC, AFS = AFS)
           break
           }
-      if(age_death < age_screen){  # death first
+      
+      # if death before next screen, break
+      if(age_death < age_screen){
           d_obs_censor <- d_obs_censor %>% 
               add_row(person_id = i, censor_type  = "censored", censor_time = age_death, AFS = AFS)
           break
@@ -94,5 +102,5 @@ for(i in 1 : n){  if(i%%100==0)  print(paste0(i, "/", n)) # person i
     }
 }
 
-count(d_obs_screen, person_id  ) %>% count(n) %>% print()
-count(d_obs_censor, censor_type) %>% print()
+# d_obs_screen %>% count(person_id  ) %>% count(n) %>% print() # distribution of total number of screens
+# d_obs_censor %>% count(censor_type) %>% print()
