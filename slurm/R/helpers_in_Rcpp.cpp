@@ -422,7 +422,8 @@ double dloglik_sojourn_H_sum(List data_objects,
 //   Grp2 I(ind_i == 0) ln[ F_P(tau_p_hat_i) ]
 //   Grp3 I(ind_i == 0) ln[ f_P(tau_p_hat_i) ]
 //
-// @keywords internal
+// exported for model comparison (loo-cv)
+// [[Rcpp::export]]
 NumericVector dloglik_sojourn_P_obj(List data_object, 
                                     List theta, 
                                     NumericVector age_at_tau_hp_hat,
@@ -552,7 +553,8 @@ List dloglik_indolent_List(List indolents, List theta) {
 // @returns NumericVector Each element provides 
 //   n_successful_screens_i ln[beta] + n_failed_screens_i ln[1 - beta]
 //
-// @keywords internal
+// exported for model comparison (loo-cv)
+// [[Rcpp::export]]
 NumericVector dloglik_screens_obj(List data_object, 
                                   List theta, 
                                   NumericVector age_at_tau_hp_hat) {
@@ -984,6 +986,74 @@ double dloglik_rate_P(List data_objects,
     
     return dlog_cp + dlog_P;
 }
+
+NumericVector dlog_likelihood_obj(List data_object, 
+                                  List theta,
+                                  NumericVector age_at_tau_hp_hat,
+                                  IntegerVector indolent, 
+                                  double t0) {
+    
+    NumericVector dlog_H = dloglik_sojourn_H_obj(data_object,
+                                                 theta,
+                                                 age_at_tau_hp_hat,
+                                                 t0);
+    
+    NumericVector dlog_P = dloglik_sojourn_P_obj(data_object, 
+                                                 theta, 
+                                                 age_at_tau_hp_hat,
+                                                 indolent);
+    
+    NumericVector dlog_S = dloglik_screens_obj(data_object, 
+                                               theta, 
+                                               age_at_tau_hp_hat);
+    
+    NumericVector dlog_I = dloglik_indolent_obj(theta, indolent);
+    
+    return dlog_H + dlog_P + dlog_S + dlog_I;
+    
+}
+
+// Compute log likelihood
+//
+// @param data_objects List The data broken down according to the censor type.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param indolents List The current estimates for indolent broken down
+//   according to the censor type. There are 3 elements:
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according 
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param theta List A named List object containing the parameters of the 
+//   distributions. 
+// @param t0 A scalar double The initial time.
+//
+// @returns List There are 3 elements. Each element is itself a List
+//   containing the probabilities of tau details for the specific
+//   censoring type.
+//
+// exported to initialize these values at start of MC
+// [[Rcpp::export]]
+double dlog_likelihood(List data_objects, 
+                       List indolents, 
+                       List age_at_tau_hp_hats, 
+                       List theta,
+                       double t0) {
+    
+    double result = 0.0;
+    for (int i = 0; i < data_objects.size(); ++i) {
+        result += sum(dlog_likelihood_obj(data_objects[i], 
+                                          theta, 
+                                          age_at_tau_hp_hats[i],
+                                          indolents[i],
+                                          t0));
+    }
+    
+    return result;  
+}
+
+
+
 
 //
 // M-H rate_H ////////
@@ -1509,7 +1579,7 @@ NumericVector dlog_prop_age_at_tau_hp_hat_obj(List data_object,
 //
 // @param data_objects List The data broken down according to the censor type.
 //   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
-// @param prob_tau List The probabilities of tau broken down according to the
+// @param prob_taus List The probabilities of tau broken down according to the
 //   censor type. There are 3 elements. 
 //   (1) "screen", (2) "censored", and (3) "clinical".
 // @param age_at_tau_hp_hats List The current estimates for the age at time of 
@@ -1717,6 +1787,78 @@ double dlog_prop_indolent_sum(List data_objects,
                                              indolents[i]));
     }
     return result;
+}
+
+
+NumericVector dlog_prop_latent_obj(List data_object, 
+                                   List prob_tau,
+                                   List theta,
+                                   NumericVector age_at_tau_hp_hat,
+                                   NumericVector prob_indolent,
+                                   IntegerVector indolent, 
+                                   double t0) {
+    
+    NumericVector dlog_prop_tau = dlog_prop_age_at_tau_hp_hat_obj(data_object,
+                                                                  prob_tau,
+                                                                  theta,
+                                                                  age_at_tau_hp_hat, 
+                                                                  t0);
+    
+    NumericVector dlog_prop_I = dlog_prop_indolent_obj(data_object, 
+                                                       prob_indolent,
+                                                       indolent);
+    
+    return dlog_prop_tau + dlog_prop_I;
+    
+}
+
+// Compute log likelihood
+//
+// @param data_objects List The data broken down according to the censor type.
+//   There are 3 elements: (1) "screen", (2) "censored", and (3) "clinical".
+// @param indolents List The current estimates for indolent broken down
+//   according to the censor type. There are 3 elements:
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param age_at_tau_hp_hats List The current estimates for the age at time of 
+//   healthy -> pre-clinical transition for each participant grouped according 
+//   to the censor type. There are 3 elements: 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param prob_indolents List The current indolence probability broken down
+//   according to the censor type. There are 3 elements. 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param prob_taus List The probabilities of tau broken down according to the
+//   censor type. There are 3 elements. 
+//   (1) "screen", (2) "censored", and (3) "clinical".
+// @param theta List A named List object containing the parameters of the 
+//   distributions. 
+// @param t0 A scalar double The initial time.
+//
+// @returns List There are 3 elements. Each element is itself a List
+//   containing the probabilities of tau details for the specific
+//   censoring type.
+//
+// exported to initialize these values at start of MC
+// [[Rcpp::export]]
+double dlog_prop_latent(List data_objects, 
+                        List indolents, 
+                        List age_at_tau_hp_hats, 
+                        List prob_indolents,
+                        List prob_taus,
+                        List theta,
+                        double t0) {
+    
+    double result = 0.0;
+    for (int i = 0; i < data_objects.size(); ++i) {
+        result += sum(dlog_prop_latent_obj(data_objects[i], 
+                                           prob_taus[i],
+                                           theta,
+                                           age_at_tau_hp_hats[i],
+                                           prob_indolents[i],
+                                           indolents[i], 
+                                           t0));
+    }
+    
+    return result;  
 }
 
 //

@@ -1,9 +1,106 @@
 
 #
+# Simulate data ####
+make_default_prior = function() {
+    list(
+        rate_H = 0.01, shape_H = 1,  # gamma(shape_H, rate_H) prior on Weibull rate for H
+        rate_P = 0.01, shape_P = 1,  # gamma(shape_H, rate_H) prior on Weibull rate for P
+        a_psi  = 1   , b_psi   = 1,  # beta(a_psi , b_psi )   prior on psi
+        a_beta = 38.5, b_beta  = 5.8 # beta(a_beta, b_beta)   prior on beta
+        )
+}
+
+simulate_data = function(n, theta) {
+    
+    # natural history
+    sojourn_H <- stats::rweibull(n, shape = theta$shape_H, scale = theta$scale_H)
+    tau_HP <- t0 + sojourn_H
+    indolent <- stats::runif(n) < theta$psi
+    sojourn_P <- stats::rweibull(n, shape = theta$shape_P, scale = theta$scale_P)
+    sojourn_P[indolent] <- Inf
+    tau_PC <- tau_HP + sojourn_P
+    
+    d_obs_screen <- matrix(0.0, nrow = n*30, ncol = 4)
+    d_obs_censor <- data.frame(person_id = numeric(n),
+                               censor_type = character(n),
+                               censor_time = numeric(n),
+                               AFS = numeric(n))
+    
+    # screens
+    k <- 0L
+    kc <- 0L
+    AFS <- sample(40L:80L, n, prob = exp(-(40:80)/5), replace = TRUE)
+    age_death <- pmin(AFS + stats::rexp(n, 1/5), 100.0)
+    
+    for (i in 1L:n) { 
+        if (i %% 1e4 == 0L)  print(paste0(i, "/", n)) # person i
+        
+        if(tau_PC[i] < AFS[i])  next # we do not observe individuals that develop a clinical cancer before their first screen.
+        
+        # generate screens until around age_death
+        intervals <- 1.0 + stats::rpois(ceiling(age_death[i]) - AFS[i], 0.5)
+        ages_screen <- AFS[i] + c(0, cumsum(intervals))
+        
+        for (j in 1L:length(ages_screen)) {
+            
+            # if clinical cancer before next screen, break
+            if (tau_PC[i] < ages_screen[j]) {
+                kc <- kc + 1L
+                d_obs_censor$person_id[kc] <- i
+                d_obs_censor$censor_type[kc] <- "clinical"
+                d_obs_censor$censor_time[kc] <- tau_PC[i]
+                d_obs_censor$AFS[kc] <- AFS[i]
+                break
+            }
+            
+            # if death before next screen, break
+            if (age_death[i] < ages_screen[j]) {
+                kc <- kc + 1L
+                d_obs_censor$person_id[kc] <- i
+                d_obs_censor$censor_type[kc] <- "censored"
+                d_obs_censor$censor_time[kc] <- age_death[i]
+                d_obs_censor$AFS[kc] <- AFS[i]
+                break
+            }
+            
+            if (ages_screen[j] < tau_HP[i]) {
+                screen_detected <- FALSE
+            } else {
+                screen_detected <- stats::runif(1L) < theta$beta
+            }
+            
+            # add the screen to the data
+            k <- k + 1L
+            d_obs_screen[k, ] <- c(i, j, ages_screen[j], screen_detected)
+            
+            # if screen is positive, break
+            if (screen_detected) {
+                kc <- kc + 1L
+                d_obs_censor$person_id[kc] <- i
+                d_obs_censor$censor_type[kc] <- "screen"
+                d_obs_censor$censor_time[kc] <- ages_screen[j]
+                d_obs_censor$AFS[kc] <- AFS[i]
+                break
+            }
+        }
+    }
+    
+    d_obs_censor <- as_tibble(d_obs_censor[1L:kc, ])
+    d_obs_screen <- as_tibble(d_obs_screen[1L:k, ])
+    colnames(d_obs_screen) <- c("person_id", "screen_id", "age_screen", "screen_detected")
+    
+    return(list(d_obs_censor=d_obs_censor, d_obs_screen=d_obs_screen))
+}
+
+#
 # Weibull ####
 
 rate2scale <- function(rate, shape){
     rate^(-1/shape)
+}
+
+rate2mean <- function(rate, shape){
+    rate^(-1/shape)*gamma(1+1/shape)
 }
 
 update_scales <- function(theta){
@@ -53,6 +150,21 @@ add_beta <- function(theta, beta){
 
 add_psi <- function(theta, psi){
     theta$psi <- psi
+    return(theta)
+}
+
+make_theta <- function(mean_H, mean_P, beta, psi, shape_H, shape_P){
+    
+    rate_H <- (mean_H/gamma(1+1/shape_H))^(-shape_H) # this gives a Weibull with mean mean_H
+    rate_P <- (mean_P/gamma(1+1/shape_P))^(-shape_P) # this gives a Weibull with mean mean_P
+    
+    theta = list(
+        rate_H = rate_H, shape_H = shape_H,
+        rate_P = rate_P, shape_P = shape_P,
+        beta   = beta  , psi = psi
+    ) %>% 
+        update_scales()
+    
     return(theta)
 }
 
@@ -994,4 +1106,74 @@ MCMC <- function(
     )
     return(out)
     
+}
+
+#
+# Model comparison ####
+
+.defineAges <- function(age.screen) {
+    
+    # the code below comes from the function MCMC_cpp
+    
+    list("values"  = unlist(age.screen),
+         "starts"  = head(c(1L, cumsum(lengths(age.screen)) + 1L), -1L) - 1L,
+         "ends"    = cumsum(lengths(age.screen)) - 1L,
+         "lengths" = lengths(age.screen))
+}
+
+make_dat.obj = function(d_obs_screen, d_obs_censor) {
+    
+    # the code below comes from the function MCMC_cpp
+    
+    n_screen_positive_total <- sum(d_obs_screen$screen_detected)
+    
+    d_obs_screen_tbl        <- d_obs_screen %>% nest(screens = screen_id:screen_detected)
+    screens                 <- d_obs_screen_tbl$screens
+    age_screen              <- screens %>% map(~ .[["age_screen"]])
+    
+    screens  <- d_obs_censor$censor_type == "screen"
+    censored <- d_obs_censor$censor_type == "censored"
+    clinical <- d_obs_censor$censor_type == "clinical"
+    
+    data.obj <- list("screen" = list("censor_type" = 1L,
+                                     "n" = sum(screens),
+                                     "censor_time" = d_obs_censor$censor_time[screens],
+                                     "ages_screen" = .defineAges(age_screen[screens]),
+                                     "n_screen_positive" = rep(1L, sum(screens))), 
+                     "censored" = list("censor_type" = 2L,
+                                       "n" = sum(censored),
+                                       "censor_time" = d_obs_censor$censor_time[censored],
+                                       "ages_screen" = .defineAges(age_screen[censored]),
+                                       "n_screen_positive" = rep(0L, sum(censored))),
+                     "clinical" = list("censor_type" = 3L,
+                                       "n" = sum(clinical),
+                                       "censor_time" = d_obs_censor$censor_time[clinical],
+                                       "ages_screen" = .defineAges(age_screen[clinical]),
+                                       "n_screen_positive" = rep(0L, sum(clinical))))
+    
+    endpoints <- compute_endpoints_cpp(data.obj, t0)
+    
+    data.obj$screen$endpoints <- endpoints$screen
+    data.obj$censored$endpoints <- endpoints$censored
+    data.obj$clinical$endpoints <- endpoints$clinical
+    
+    return(data.obj)
+}
+
+generate_Z = function(theta, data.obj, t0) {
+    
+    # the code below comes from the function MCMC_cpp
+    
+    # sample Z^HP
+    prob_tau <- compute_prob_tau_List(data.obj, theta, t0)
+    age_at_tau_hp_hats <- rprop_age_at_tau_hp_hat_List(data.obj, prob_tau, theta, t0)
+    # sampler Z^I
+    prob_indolent <- compute_prob_indolent_List(data.obj, age_at_tau_hp_hats, theta)
+    indolents <- rprop_indolent_List(data.obj, prob_indolent_0)
+    
+    return(list(indolent = indolents, tau_HP = age_at_tau_hp_hats))
+}
+
+is_theta_valid = function(theta) {
+    all(theta > 0) & all(theta[3:4] < 1) # rate_H and rate_P > 0 and 0<psi,beta<1
 }
