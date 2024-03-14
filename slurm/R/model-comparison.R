@@ -128,8 +128,24 @@ for(shape_H in c(1,2)){
     }
 }
 
-# compare the elpd_loo (larger is better)
-se_14 = sqrt(n*var(results$elpd_loo_vec[[1]] - results$elpd_loo_vec[[4]]))
-se_34 = sqrt(n*var(results$elpd_loo_vec[[3]] - results$elpd_loo_vec[[4]]))
-(results$elpd_loo[4] - results$elpd_loo[1])/se_14
-(results$elpd_loo[4] - results$elpd_loo[3])/se_34
+# compare the elpd_loo with model 4
+se = numeric(3)
+for(model in 1:3) {
+    se    [model] = sqrt(n*var(results$elpd_loo_vec[[4]] - results$elpd_loo_vec[[model]]))
+}
+
+# t statistics
+t_stat = abs(results$elpd_loo[4] - results$elpd_loo[1:3]) / se
+# p-values
+p_val  = pt(t_stat, df = n-1, lower.tail = FALSE)
+
+results = results %>%
+    mutate(
+        se = c(se, NA),
+        t_stat = c(t_stat, NA),
+        p_val = c(p_val, NA),
+    )
+results
+
+
+
