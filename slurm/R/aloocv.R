@@ -72,15 +72,14 @@ path_aloocv <- "output/misc/aloocv"
 ## setup ####
 S = nrow(theta_MCMC)
 n = nrow(d_obs_censor)
-n=1e4
-J=200 # number of IS samples
-ess_target = 100
-# current: n=10e3 and J=2e3 takes 17 hours per model
-# goal: n=40e3 and J=3e3
-z_tau_HP=z_I=qlog=loglik_joint=numeric(J) # containers for IS
+n=10
+J_increment = 200 # number of IS samples per increment
+ess_target = 100 # target ESS for each (i,s)
 
-# lik 
-lik = ess = n_is = matrix(0, nrow = S, ncol = n)
+
+# containers
+z_tau_HP = z_I = qlog = loglik_joint = numeric(J_increment)
+lik = ess = J = matrix(0, nrow = S, ncol = n)
 
 # prepare theta
 theta_list = vector("list", S)
@@ -119,20 +118,20 @@ for(i in 1:n) {  print(paste0(i, "/",n)) # to be parallelized
     d_obs_censor_i = d_obs_censor %>% filter(person_id==id)
     d_obs_screen_i = d_obs_screen %>% filter(person_id==id)
     
-    # replicate the data J times
+    # replicate the data J_increment times
     d_obs_censor_i_rep = tibble(
-        person_id = 1:J,
+        person_id = 1:J_increment,
         AFS = d_obs_censor_i$AFS,
         censor_type = d_obs_censor_i$censor_type,
         censor_time = d_obs_censor_i$censor_time
     )
     
     d_obs_screen_i_rep = tibble(
-        person_id = rep(1:J, each=nrow(d_obs_screen_i)),
-        AFS = rep(d_obs_screen_i$AFS, J),
-        screen_id = rep(d_obs_screen_i$screen_id, J),
-        age_screen = rep(d_obs_screen_i$age_screen, J),
-        screen_detected = rep(d_obs_screen_i$screen_detected, J)
+        person_id = rep(1:J_increment, each=nrow(d_obs_screen_i)),
+        AFS = rep(d_obs_screen_i$AFS, J_increment),
+        screen_id = rep(d_obs_screen_i$screen_id, J_increment),
+        age_screen = rep(d_obs_screen_i$age_screen, J_increment),
+        screen_detected = rep(d_obs_screen_i$screen_detected, J_increment)
     )
     
     data_object = make_dat.obj(d_obs_screen_i_rep, d_obs_censor_i_rep) %>% .[[group]]
@@ -140,9 +139,9 @@ for(i in 1:n) {  print(paste0(i, "/",n)) # to be parallelized
     for(s in 1:S) {  #print(paste0(s, "/",S))
         
         integrand = NULL
-        n_IS = 0
+        n_increment = 0
         
-        while(ess[s,i] < ess_target && n_IS < 25) {
+        while(ess[s,i] < ess_target && n_increment < 25) {
             
             # importance sampling
             prob_tau      = compute_prob_tau_obj(data_object, theta_list[[s]], t0)
@@ -156,22 +155,22 @@ for(i in 1:n) {  print(paste0(i, "/",n)) # to be parallelized
             integrand = c(integrand, exp(loglik_joint-qlog))
             lik[s,i]  = mean(integrand)
             
-            # number of IS samples needed
-            n_IS = n_IS+1
-            
             # ESS
             integrand_norm=integrand / sum(integrand)
             ess[s,i]=1/sum(integrand_norm^2)
             
+            # number of increments
+            n_increment = n_increment+1
+            
         }
-        n_is[s,i] = n_IS * J
+        J[s,i] = n_increment * J_increment
     }
 }
 
 
 results = tibble(
     shape_H=shape_H, shape_P=shape_P,
-    lik=list(lik), ess=list(ess), n_is=list(n_is)
+    lik=list(lik), ess=list(ess), J=list(J)
 )
 
 save(results, file=paste0(path_aloocv, "/shape_H=",shape_H,"-shape_P=",shape_P,".RDATA"))
