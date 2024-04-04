@@ -3,12 +3,8 @@
 # setup ####
 rm(list=ls())
 
-set.seed(0)
-
 library(tidyverse)
-library(mvtnorm)
 library(Rcpp)
-library(coda)
 
 
 a <- as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID"))
@@ -37,7 +33,7 @@ path_aloocv <- "output/misc/aloocv"
     # Load data
     t0=30
     sim_id     <- paste0(
-        "M=", 1e3,
+        "M=", 1e5,
         "-AFS_low=", 50,
         "-AFS_upp=", 74,
         "-shape_H=", shape_H,
@@ -53,16 +49,8 @@ path_aloocv <- "output/misc/aloocv"
     # MCMC draws
     theta_MCMC = as_tibble(out$THETA)
     
-    # make data object
-    data.obj = make_dat.obj(d_obs_screen %>% filter(person_id==105), d_obs_censor %>% filter(person_id==105))
-    
-    # group indices
-    screens  <- d_obs_censor$censor_type == "screen"
-    censored <- d_obs_censor$censor_type == "censored"
-    clinical <- d_obs_censor$censor_type == "clinical"
-    
     # unique person id
-    id_vec = unique(d_obs_censor$person_id) %>% sample()
+    id_vec = unique(d_obs_censor$person_id)
 }
 
 
@@ -72,9 +60,8 @@ path_aloocv <- "output/misc/aloocv"
 ## setup ####
 S = nrow(theta_MCMC)
 n = nrow(d_obs_censor)
-n=10
-J_increment = 200 # number of IS samples per increment
-ess_target = 100 # target ESS for each (i,s)
+J_increment = 225 # number of IS samples per increment
+ess_target = 200 # target ESS for each (i,s)
 
 
 # containers
@@ -111,8 +98,10 @@ for(s in 1:S) {  #print(paste0(s, "/",S))
 ## aloocv ####
 for(i in 1:n) {  print(paste0(i, "/",n)) # to be parallelized
     
-    # get data for subject i
+    # id of i-th individual
     id = id_vec[i]
+    
+    # get data for subject i
     group = d_obs_censor %>% filter(person_id==id) %>% pull(censor_type)
     
     d_obs_censor_i = d_obs_censor %>% filter(person_id==id)
@@ -138,6 +127,8 @@ for(i in 1:n) {  print(paste0(i, "/",n)) # to be parallelized
     
     for(s in 1:S) {  #print(paste0(s, "/",S))
         
+        set.seed(s)
+        
         integrand = NULL
         n_increment = 0
         
@@ -152,7 +143,7 @@ for(i in 1:n) {  print(paste0(i, "/",n)) # to be parallelized
             loglik_joint  = dlog_likelihood_obj(data_object, theta_list[[s]], z_tau_HP, z_I, t0)
             
             # IS estimate
-            integrand = c(integrand, exp(loglik_joint-qlog))
+            integrand = c(integrand, exp(loglik_joint - qlog))
             lik[s,i]  = mean(integrand)
             
             # ESS
@@ -169,22 +160,26 @@ for(i in 1:n) {  print(paste0(i, "/",n)) # to be parallelized
 
 
 results = tibble(
-    shape_H=shape_H, shape_P=shape_P,
-    lik=list(lik), ess=list(ess), J=list(J)
-)
+    shape_H=shape_H, shape_P=shape_P, lik=list(lik), ess=list(ess), J=list(J)
+    )
+results_summary = results %>%
+    mutate(
+        ess_min = ess %>% map_dbl(min),
+        ess_mean = ess %>% map_dbl(mean),
+        ess_q001 = ess %>% map_dbl(quantile, probs=0.01),
+        J_max = J %>% map_dbl(min),
+        J_mean = J %>% map_dbl(mean),
+        J_q099 = J %>% map_dbl(quantile, probs=0.99),
+        lpd = lik %>% map_dbl(~sum(log(colMeans(.)))),
+        elpd_loo_vec = lik %>% map(~log(1/colMeans(1/.))),
+        elpd_loo = elpd_loo_vec %>% map_dbl(mean)
+    ) %>%
+    select(-lik, -ess, -J)
 
-save(results, file=paste0(path_aloocv, "/shape_H=",shape_H,"-shape_P=",shape_P,".RDATA"))
+save(results        , file=paste0(path_aloocv, "/shape_H=",shape_H,"-shape_P=",shape_P,".RDATA"))
+save(results_summary, file=paste0(path_aloocv, "/summary-shape_H=",shape_H,"-shape_P=",shape_P,".RDATA"))
 
         # for(s in 1:S){  
-        #     
-        #     # get theta
-        #     theta_tbl = theta_MCMC[s,]
-        #     theta_s = list(
-        #         rate_H = theta_tbl$RATE_H, shape_H = shape_H,
-        #         rate_P = theta_tbl$RATE_P, shape_P = shape_P,
-        #         beta   = theta_tbl$BETA, psi = theta_tbl$PSI
-        #     ) %>% 
-        #         update_scales()
         #     
         #     
         #     # compute loglik for each group
