@@ -987,6 +987,8 @@ double dloglik_rate_P(List data_objects,
     return dlog_cp + dlog_P;
 }
 
+// exported to compare models
+// [[Rcpp::export]]
 NumericVector dlog_likelihood_obj(List data_object, 
                                   List theta,
                                   NumericVector age_at_tau_hp_hat,
@@ -1257,7 +1259,9 @@ List MH_rate_P(List data_objects,
 //   pertaining to individual i; and `lengths` the number of element in `values`
 //   pertaining to individual i.
 //
-// @keywords internal
+//
+// exported to propose latent data for model comparison
+// [[Rcpp::export]]
 List compute_prob_tau_obj(List data_object, List theta, double t0) {
     
     // this is a bit of a misnomer. more of an event/censor age as this
@@ -1392,7 +1396,8 @@ List compute_prob_tau_List(List data_objects, List theta, double t0) {
 // @returns NumericVector The new estimated tau for each case in the 
 //   censoring type under consideration
 //
-// @keywords internal
+// exported to propose latent data for model comparison
+// [[Rcpp::export]]
 NumericVector rprop_age_at_tau_hp_hat_obj(List data_object, 
                                        List prob_tau, 
                                        List theta, 
@@ -1622,7 +1627,8 @@ List dlog_prop_age_at_tau_hp_hat_List(List data_objects,
 //
 // @returns NumericVector 
 //
-// @keywords internal
+// exported to generate latent variable for model compariosn
+// [[Rcpp::export]]
 NumericVector compute_prob_indolent_obj(List data_object, List theta,
                                         NumericVector age_at_tau_hp_hat) {
     
@@ -1684,7 +1690,8 @@ List compute_prob_indolent_List(List data_objects, List age_at_tau_hp_hats, List
 //
 // @returns IntegerVector Indicator of indolence.
 //
-// @keywords internal
+// exported to propose latent data for model comparison
+// [[Rcpp::export]]
 IntegerVector rprop_indolent_obj(List data_object, NumericVector prob_indolent) {
     
     int censor_type = data_object["censor_type"];
@@ -1790,6 +1797,8 @@ double dlog_prop_indolent_sum(List data_objects,
 }
 
 
+// exported to initialize these values at start of MC
+// [[Rcpp::export]]
 NumericVector dlog_prop_latent_obj(List data_object, 
                                    List prob_tau,
                                    List theta,
